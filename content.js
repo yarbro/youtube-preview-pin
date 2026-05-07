@@ -13,10 +13,10 @@
 
   // ---- State ---------------------------------------------------------------
 
-  let pinnedCard        = null;  // card element currently pinned
-  let hiddenBlocker     = null;  // MutationObserver keeping the preview visible
-  let currentPreviewCard = null; // card whose preview is currently showing
-  let pinnedNaturalW    = 0;     // unscaled offsetWidth recorded at pin time
+  let pinnedCard         = null;  // card element currently pinned
+  let hiddenBlocker      = null;  // MutationObserver keeping the preview visible
+  let currentPreviewCard = null;  // card whose preview is currently showing
+  let pinnedNaturalW     = 0;     // unscaled offsetWidth recorded at pin time
 
   // page_shim.js runs in world:"MAIN" at document_start (manifest.json).
   // We communicate via synchronous CustomEvent: dispatchEvent runs all handlers
@@ -103,7 +103,7 @@
 
   // ---- Pin / Unpin ---------------------------------------------------------
 
-  function pin(card) {
+  function pin(card, disableCaptions = true) {
     if (pinnedCard === card) return;
     if (pinnedCard) unpin();
 
@@ -117,7 +117,7 @@
     // all handlers inline, so pinned=true and lockedVP are set before the next
     // line. The mouseleave wrapper is already armed when the browser synthesises
     // a mouseleave from the element shifting under the cursor.
-    document.dispatchEvent(new CustomEvent('ytpp-pin'));
+    document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions } }));
 
     // Record natural width before ytpp-pinned is applied so the resize handler
     // can recompute scale without ever touching (and disturbing) the element.
@@ -162,8 +162,14 @@
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-      if (pinnedCard) unpin();
-      else if (currentPreviewCard && isPreviewVisible()) pin(currentPreviewCard);
+      if (pinnedCard) {
+        unpin();
+      } else if (currentPreviewCard && isPreviewVisible()) {
+        const card = currentPreviewCard;
+        chrome.storage.sync.get({ disableCaptionsOnPin: true }, ({ disableCaptionsOnPin }) => {
+          if (card === currentPreviewCard && isPreviewVisible()) pin(card, disableCaptionsOnPin);
+        });
+      }
       return;
     }
 

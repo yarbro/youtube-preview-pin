@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>YouTube Preview Pin — Settings</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 24px; color: #222; }
+    h1 { font-size: 1rem; font-weight: 600; margin-bottom: 24px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; border-bottom: 1px solid #eee; }
+    .row-text label { font-size: 0.9rem; font-weight: 500; display: block; }
+    .row-text p { font-size: 0.8rem; color: #666; margin: 3px 0 0; }
+    .toggle { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .slider { position: absolute; inset: 0; background: #ccc; border-radius: 24px; cursor: pointer; transition: background 0.18s; }
+    .slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform 0.18s; }
+    input:checked + .slider { background: #c00; }
+    input:checked + .slider::before { transform: translateX(18px); }
+    input:focus-visible + .slider { outline: 2px solid #c00; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <h1>YouTube Preview Pin</h1>
+  <div class="row">
+    <div class="row-text">
+      <label for="disableCaptions">Disable captions when pinning</label>
+      <p>YouTube previews default to captions on.</p>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="disableCaptions">
+      <span class="slider"></span>
+    </label>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

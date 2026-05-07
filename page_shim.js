@@ -165,7 +165,7 @@
   // Dispatched synchronously by content.js, ensuring pinned/lockedVP are set
   // before the CSS class is applied and the element moves.
 
-  document.addEventListener('ytpp-pin', () => {
+  document.addEventListener('ytpp-pin', (e) => {
     pinned   = true;
     lockedVP = document.querySelector('ytd-video-preview');
 
@@ -186,7 +186,7 @@
     } catch (_) {}
 
     // Captions: simulate the CC button click so YouTube records the preference.
-    try { disableCaptions(); } catch (_) {}
+    if (e.detail?.disableCaptions) try { disableCaptions(); } catch (_) {}
 
     // Pause protection: patch video.pause and add a 'pause' event guard.
     try {

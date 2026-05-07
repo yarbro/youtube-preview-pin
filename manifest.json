@@ -4,6 +4,11 @@
   "version": "1.0.0",
   "description": "Click YouTube hover previews to pin and enlarge them so they keep playing without you holding the mouse over them.",
   "homepage_url": "https://github.com/yarbro/youtube-preview-pin",
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
+  "permissions": ["storage"],
   "content_scripts": [
     {
       "matches": [
