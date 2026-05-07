@@ -17,16 +17,16 @@
  *    toggleAttribute('hidden'), and the hidden IDL setter on the locked element,
  *    ensuring YouTube can't hide the preview element while pinned.
  *
- * 3. PLAYER CONTROL — Unmutes audio, disables captions, and blocks video.pause
- *    while pinned via the YouTube player API and an HTMLMediaElement patch.
+ * 3. PLAYER CONTROL — Unmutes audio, simulates a CC button click to disable
+ *    captions, and blocks video.pause while pinned.
  */
 (function () {
   'use strict';
 
-  let pinned       = false;
-  let lockedVP     = null;  // ytd-video-preview element being protected
-  let guardedVideo = null;
-  let pauseGuardFn = null;
+  let pinned          = false;
+  let lockedVP        = null;  // ytd-video-preview element being protected
+  let guardedVideo    = null;
+  let pauseGuardFn    = null;
 
   // ---- 1. EventTarget.prototype.addEventListener intercept ----------------
   // Installed before any YouTube script runs (guaranteed by document_start).
@@ -110,6 +110,13 @@
     return vp.playerApi ?? null;
   }
 
+  // ---- Caption blocking ----------------------------------------------------
+
+  function disableCaptions() {
+    const btn = document.querySelector('ytd-video-preview .ytmClosedCaptioningButtonButton');
+    if (btn?.getAttribute('aria-pressed') === 'true') btn.click();
+  }
+
   // ---- Pause blocking ------------------------------------------------------
 
   function patchPause(video) {
@@ -178,14 +185,8 @@
       }
     } catch (_) {}
 
-    // Captions: unload via player API, fall back to textTracks.
-    try {
-      getPlayer()?.unloadModule?.('captions');
-      const video = getVideo();
-      if (video?.textTracks) {
-        for (const track of video.textTracks) track.mode = 'disabled';
-      }
-    } catch (_) {}
+    // Captions: simulate the CC button click so YouTube records the preference.
+    try { disableCaptions(); } catch (_) {}
 
     // Pause protection: patch video.pause and add a 'pause' event guard.
     try {
