@@ -67,16 +67,16 @@ body.ytpp-active ytd-video-preview {
 
 /* ---- Pin button -----------------------------------------------------------
  * Injected into ytd-video-preview by content.js. Hidden by default; fades in
- * on hover. Red tint while pinned signals "click to unpin".
+ * on hover. Hidden entirely while pinned (unpin lives in the controls bar).
  */
 .ytpp-pin-btn {
   position: absolute;
-  top: 10px;
-  left: 10px;
+  top: 14px;
+  left: 14px;
   z-index: 10001;
   background: rgba(20, 20, 20, 0.82);
   color: #fff;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: 20px;
   padding: 5px 13px;
   font: 500 12px/1.4 'Roboto', Arial, sans-serif;
@@ -91,7 +91,6 @@ body.ytpp-active ytd-video-preview {
   -webkit-backdrop-filter: blur(6px);
 }
 
-/* Show on hover for an unpinned preview. */
 ytd-video-preview:not([hidden]):hover .ytpp-pin-btn {
   opacity: 1;
   pointer-events: auto;
@@ -101,15 +100,64 @@ ytd-video-preview:not([hidden]):hover .ytpp-pin-btn:hover {
   background: rgba(50, 50, 50, 0.92);
 }
 
-/* Show on hover while pinned.
- * The element has pointer-events:none so :hover won't match it directly;
- * :has(:hover) matches when any child (pointer-events:auto) is under the cursor. */
-ytd-video-preview.ytpp-pinned:has(:hover) .ytpp-pin-btn {
-  opacity: 1;
-  pointer-events: auto;
-  background: rgba(200, 0, 0, 0.88);
+ytd-video-preview.ytpp-pinned .ytpp-pin-btn {
+  display: none;
 }
 
-ytd-video-preview.ytpp-pinned:has(:hover) .ytpp-pin-btn:hover {
-  background: rgba(170, 0, 0, 0.95);
+/* ---- Controls bar ---------------------------------------------------------
+ * Positioned absolutely inside ytd-video-preview so YouTube's body transform
+ * doesn't affect its containing block. Shown via :has(:hover) when pinned.
+ */
+#ytpp-controls {
+  display: none;
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 10002;
+  flex-direction: row;
+  gap: 8px;
+  align-items: center;
+}
+
+ytd-video-preview.ytpp-pinned:has(:hover) #ytpp-controls {
+  display: flex;
+}
+
+/* Counter-scale so the controls render at natural size despite the parent transform. */
+ytd-video-preview.ytpp-pinned #ytpp-controls {
+  transform: scale(calc(1 / var(--ytpp-scale, 1.5)));
+  transform-origin: top left;
+}
+
+.ytpp-unpin-btn {
+  background: rgba(20, 20, 20, 0.72);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 20px;
+  padding: 9px 22px;
+  font: 500 14px/1.4 'Roboto', Arial, sans-serif;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  white-space: nowrap;
+  margin: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: background 0.15s;
+}
+
+.ytpp-unpin-btn:hover {
+  background: rgba(20, 20, 20, 0.88);
+}
+
+/* ---- Hide YouTube player controls when pinned and not hovering ----------- */
+ytd-video-preview.ytpp-pinned yt-inline-player-controls {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.15s;
+}
+
+ytd-video-preview.ytpp-pinned:has(:hover) yt-inline-player-controls {
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }

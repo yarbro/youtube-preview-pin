@@ -38,12 +38,16 @@
 
   // ---- DOM setup -----------------------------------------------------------
 
-  // Full-screen backdrop: darkens the page and absorbs all mouse events so
-  // YouTube's card hover handlers never fire while a preview is pinned.
-  // Clicking it unpins (handled by the click listener below).
   const backdrop = document.createElement('div');
   backdrop.id = 'ytpp-backdrop';
   document.body.appendChild(backdrop);
+
+  const controls = document.createElement('div');
+  controls.id = 'ytpp-controls';
+  const unpinBtn = document.createElement('button');
+  unpinBtn.className = 'ytpp-unpin-btn';
+  unpinBtn.textContent = '📌 Unpin';
+  controls.appendChild(unpinBtn);
 
   // ---- Preview card tracking -----------------------------------------------
 
@@ -55,11 +59,6 @@
 
   // ---- Pin button ----------------------------------------------------------
 
-  function setPinButtonLabel(vp, isPinned) {
-    const btn = vp?.querySelector('.ytpp-pin-btn');
-    if (btn) btn.textContent = isPinned ? '📌 Unpin' : '📌 Pin';
-  }
-
   function ensurePinButton() {
     const vp = getPreviewEl();
     if (!vp || vp.querySelector('.ytpp-pin-btn')) return;
@@ -68,7 +67,15 @@
     btn.textContent = '📌 Pin';
     vp.appendChild(btn);
   }
+
+  function ensureControls() {
+    const vp = getPreviewEl();
+    if (!vp || vp.querySelector('#ytpp-controls')) return;
+    vp.appendChild(controls);
+  }
+
   ensurePinButton();
+  ensureControls();
 
   // ---- Hidden-attribute guard ----------------------------------------------
   // Watches ytd-video-preview and all descendants
@@ -113,21 +120,16 @@
     pinnedCard = card;
     card.classList.add('ytpp-pinned-card');
 
-    // Arm page_shim.js synchronously BEFORE the CSS move. dispatchEvent runs
-    // all handlers inline, so pinned=true and lockedVP are set before the next
-    // line. The mouseleave wrapper is already armed when the browser synthesises
-    // a mouseleave from the element shifting under the cursor.
+    // Arm page_shim.js synchronously BEFORE the element moves.
     document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions } }));
 
-    // Record natural width before ytpp-pinned is applied so the resize handler
-    // can recompute scale without ever touching (and disturbing) the element.
+    // Measure before ytpp-pinned so position:fixed doesn't change the width.
     pinnedNaturalW = vp.offsetWidth || 360;
     document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW));
 
-    document.body.classList.add('ytpp-active'); // shows backdrop
-    vp.classList.add('ytpp-pinned');            // centers + scales the preview
+    document.body.classList.add('ytpp-active');
+    vp.classList.add('ytpp-pinned');
     startBlockingHidden(vp);
-    setPinButtonLabel(vp, true);
   }
 
   function unpin() {
@@ -138,16 +140,13 @@
     document.dispatchEvent(new CustomEvent('ytpp-unpin'));
 
     pinnedCard.classList.remove('ytpp-pinned-card');
-    document.body.classList.remove('ytpp-active');
+    document.body.classList.remove('ytpp-active', 'ytpp-controls-active');
     pinnedCard     = null;
     pinnedNaturalW = 0;
     stopBlockingHidden();
 
     const vp = getPreviewEl();
-    if (vp) {
-      vp.classList.remove('ytpp-pinned');
-      setPinButtonLabel(vp, false);
-    }
+    if (vp) vp.classList.remove('ytpp-pinned');
     document.documentElement.style.removeProperty('--ytpp-scale');
   }
 
@@ -156,6 +155,14 @@
   // Pin / unpin via the injected button, or unpin by clicking the backdrop.
   document.addEventListener('click', (e) => {
     if (e.button !== 0) return;
+
+    if (e.target.closest?.('.ytpp-unpin-btn')) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      unpin();
+      return;
+    }
 
     if (e.target.closest?.('.ytpp-pin-btn')) {
       e.preventDefault();
@@ -207,9 +214,8 @@
   // Resize: recompute scale using the stored natural width so we never need to
   // remove ytpp-pinned (which would disturb YouTube's player state).
   window.addEventListener('resize', () => {
-    if (pinnedCard && pinnedNaturalW) {
-      document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW));
-    }
+    if (!pinnedCard || !pinnedNaturalW) return;
+    document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW));
   });
 
   // SPA navigation: unpin and re-inject the button after YouTube rebuilds the DOM.
@@ -217,6 +223,7 @@
   document.addEventListener('yt-navigate-finish', () => {
     unpin();
     ensurePinButton();
+    ensureControls();
   });
 
 })();
