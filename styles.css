@@ -1,0 +1,115 @@
+/* ---- Backdrop -------------------------------------------------------------
+ * Full-screen fixed overlay between the pinned preview (z 99999) and all
+ * YouTube page content (z ~0). Two jobs:
+ *   1. Darkens the page behind the centered preview.
+ *   2. Absorbs all mouse events so YouTube's card hover handlers never fire
+ *      while pinned. Clicking it unpins (caught by the document click listener).
+ */
+#ytpp-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  z-index: 99998;
+  cursor: default;
+}
+
+body.ytpp-active #ytpp-backdrop {
+  display: block;
+}
+
+/* ---- Pinned preview -------------------------------------------------------
+ * Fixed + centered. Scale is driven by --ytpp-scale (set from JS based on
+ * viewport width), falling back to 1.5 if the variable isn't set yet.
+ *
+ * pointer-events:none on the element itself prevents YouTube's mouseleave
+ * handler from firing when the cursor is on the backdrop; children get
+ * pointer-events:auto so controls and the pin button stay interactive.
+ */
+ytd-video-preview.ytpp-pinned {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) scale(var(--ytpp-scale, 1.5)) !important;
+  transform-origin: center center !important;
+  z-index: 99999 !important;
+  transition: none !important;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.85);
+  border-radius: 12px;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+
+ytd-video-preview.ytpp-pinned * {
+  pointer-events: auto !important;
+}
+
+/* Belt-and-suspenders: keep the element renderable even if YouTube sets
+ * hidden or display:none on blur / mouseleave. */
+body.ytpp-active ytd-video-preview {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* ---- Freeze non-pinned cards ----------------------------------------------
+ * Prevents YouTube from detecting hover on other cards while pinned.
+ * JS listeners in content.js provide a secondary guard for events that
+ * slip through. */
+.ytpp-active ytd-rich-item-renderer:not(.ytpp-pinned-card),
+.ytpp-active ytd-video-renderer:not(.ytpp-pinned-card),
+.ytpp-active ytd-grid-video-renderer:not(.ytpp-pinned-card),
+.ytpp-active ytd-compact-video-renderer:not(.ytpp-pinned-card),
+.ytpp-active ytd-rich-grid-media:not(.ytpp-pinned-card),
+.ytpp-active ytd-reel-item-renderer:not(.ytpp-pinned-card) {
+  pointer-events: none !important;
+}
+
+/* ---- Pin button -----------------------------------------------------------
+ * Injected into ytd-video-preview by content.js. Hidden by default; fades in
+ * on hover. Red tint while pinned signals "click to unpin".
+ */
+.ytpp-pin-btn {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 10001;
+  background: rgba(20, 20, 20, 0.82);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 5px 13px;
+  font: 500 12px/1.4 'Roboto', Arial, sans-serif;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  pointer-events: none;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* Show on hover for an unpinned preview. */
+ytd-video-preview:not([hidden]):hover .ytpp-pin-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+ytd-video-preview:not([hidden]):hover .ytpp-pin-btn:hover {
+  background: rgba(50, 50, 50, 0.92);
+}
+
+/* Show on hover while pinned.
+ * The element has pointer-events:none so :hover won't match it directly;
+ * :has(:hover) matches when any child (pointer-events:auto) is under the cursor. */
+ytd-video-preview.ytpp-pinned:has(:hover) .ytpp-pin-btn {
+  opacity: 1;
+  pointer-events: auto;
+  background: rgba(200, 0, 0, 0.88);
+}
+
+ytd-video-preview.ytpp-pinned:has(:hover) .ytpp-pin-btn:hover {
+  background: rgba(170, 0, 0, 0.95);
+}
