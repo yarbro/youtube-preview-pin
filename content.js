@@ -139,9 +139,8 @@
 
     pinnedCard.classList.remove('ytpp-pinned-card');
     document.body.classList.remove('ytpp-active');
-    pinnedCard         = null;
-    currentPreviewCard = null;
-    pinnedNaturalW     = 0;
+    pinnedCard     = null;
+    pinnedNaturalW = 0;
     stopBlockingHidden();
 
     const vp = getPreviewEl();
