@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff4040"/>
+      <stop offset="100%" stop-color="#bb0000"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="35%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.18)"/>
+      <stop offset="100%" stop-color="rgba(0,0,0,0.14)"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="1.5" dy="2" stdDeviation="2.5" flood-color="rgba(0,0,0,0.4)"/>
+    </filter>
+  </defs>
+
+  <rect width="128" height="128" rx="26" fill="url(#bg)"/>
+  <rect width="128" height="128" rx="26" fill="url(#shine)"/>
+
+  <g transform="translate(64,60) rotate(-42) scale(0.9)" fill="white" filter="url(#shadow)">
+    <!-- Circle head, overlapping top of shaft -->
+    <circle cx="0" cy="-26" r="20"/>
+    <!-- Shaft + smoothly tapered tip as one path.
+         Sides stay straight until y=30, then bezier-curve inward to a point at y=56. -->
+    <path d="M -5,-30 L -5,30 Q -5,50 0,56 Q 5,50 5,30 L 5,-30 Z"/>
+  </g>
+</svg>
