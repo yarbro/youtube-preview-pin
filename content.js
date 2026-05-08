@@ -28,6 +28,7 @@
   const getPreviewEl     = () => document.querySelector('ytd-video-preview');
   const isPreviewVisible = () => { const vp = getPreviewEl(); return vp && !vp.hasAttribute('hidden'); };
   const findCard         = (el) => el?.closest?.(CARD_SELECTORS) ?? null;
+  const isShortCard      = (card) => !!card.querySelector('ytm-shorts-lockup-view-model');
 
   // Fill up to 80% of the viewport width, capped at 1200 px.
   // naturalW is the element's offsetWidth *before* ytpp-pinned is applied.
@@ -54,7 +55,13 @@
   document.addEventListener('mouseenter', (e) => {
     if (pinnedCard) return;
     const card = findCard(e.target);
-    if (card) currentPreviewCard = card;
+    if (!card) return;
+    if (isShortCard(card)) {
+      document.body.classList.add('ytpp-on-short');
+    } else {
+      document.body.classList.remove('ytpp-on-short');
+      currentPreviewCard = card;
+    }
   }, true);
 
   // ---- Pin button ----------------------------------------------------------

@@ -96,6 +96,11 @@ ytd-video-preview:not([hidden]):hover .ytpp-pin-btn {
   pointer-events: auto;
 }
 
+body.ytpp-on-short .ytpp-pin-btn {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 ytd-video-preview:not([hidden]):hover .ytpp-pin-btn:hover {
   background: rgba(50, 50, 50, 0.92);
 }
