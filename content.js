@@ -28,7 +28,9 @@
   const getPreviewEl     = () => document.querySelector('ytd-video-preview');
   const isPreviewVisible = () => { const vp = getPreviewEl(); return vp && !vp.hasAttribute('hidden'); };
   const findCard         = (el) => el?.closest?.(CARD_SELECTORS) ?? null;
-  const isShortCard      = (card) => !!card.querySelector('ytm-shorts-lockup-view-model');
+  const isShortCard      = (card) =>
+    !!card.querySelector('ytm-shorts-lockup-view-model') ||
+    !!card.querySelector('a[href*="/shorts/"]');
 
   // Fill up to 80% of the viewport width, capped at 1200 px.
   // naturalW is the element's offsetWidth *before* ytpp-pinned is applied.
@@ -84,6 +86,20 @@
   ensurePinButton();
   ensureControls();
 
+  // Re-inject buttons if YouTube reconstructs ytd-video-preview outside of
+  // a full navigation (e.g. player state changes, lazy DOM updates).
+  new MutationObserver((mutations) => {
+    for (const { addedNodes } of mutations) {
+      for (const node of addedNodes) {
+        if (node.nodeType === 1 && node.tagName === 'YTD-VIDEO-PREVIEW') {
+          ensurePinButton();
+          ensureControls();
+          return;
+        }
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+
   // ---- Hidden-attribute guard ----------------------------------------------
   // Watches ytd-video-preview and all descendants
   // for hidden / display:none / visibility:hidden / opacity:0 set via inline
@@ -131,7 +147,7 @@
     document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions } }));
 
     // Measure before ytpp-pinned so position:fixed doesn't change the width.
-    pinnedNaturalW = vp.offsetWidth || 360;
+    pinnedNaturalW = vp.offsetWidth || Math.round(window.innerWidth * 0.25);
     document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW));
 
     document.body.classList.add('ytpp-active');
@@ -180,7 +196,7 @@
       } else if (currentPreviewCard && isPreviewVisible()) {
         const card = currentPreviewCard;
         chrome.storage.sync.get({ disableCaptionsOnPin: true }, ({ disableCaptionsOnPin }) => {
-          if (card === currentPreviewCard && isPreviewVisible()) pin(card, disableCaptionsOnPin);
+          if (card === currentPreviewCard && document.contains(card) && isPreviewVisible()) pin(card, disableCaptionsOnPin);
         });
       }
       return;
@@ -226,7 +242,10 @@
   });
 
   // SPA navigation: unpin and re-inject the button after YouTube rebuilds the DOM.
-  document.addEventListener('yt-navigate-start', unpin);
+  document.addEventListener('yt-navigate-start', () => {
+    unpin();
+    document.body.classList.remove('ytpp-on-short');
+  });
   document.addEventListener('yt-navigate-finish', () => {
     unpin();
     ensurePinButton();

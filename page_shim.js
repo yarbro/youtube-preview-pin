@@ -113,7 +113,10 @@
   // ---- Caption blocking ----------------------------------------------------
 
   function disableCaptions() {
-    const btn = document.querySelector('ytd-video-preview .ytmClosedCaptioningButtonButton');
+    const btn =
+      document.querySelector('ytd-video-preview .ytmClosedCaptioningButtonButton') ??
+      [...document.querySelectorAll('ytd-video-preview button[aria-pressed]')]
+        .find(b => /caption|subtitle/i.test(b.getAttribute('aria-label') ?? ''));
     if (btn?.getAttribute('aria-pressed') === 'true') btn.click();
   }
 
