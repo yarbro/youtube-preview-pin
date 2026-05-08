@@ -23,6 +23,16 @@
 (function () {
   'use strict';
 
+  // YouTube DOM selectors. Centralized so any breakage from a YouTube rename
+  // surfaces in one place.
+  const YT = {
+    PREVIEW:           'ytd-video-preview',
+    PREVIEW_VIDEO:     'ytd-video-preview video',
+    PLAYER:            'ytd-player',
+    CC_BUTTON:         'ytd-video-preview .ytmClosedCaptioningButtonButton',
+    CC_BUTTON_PRESSED: 'ytd-video-preview button[aria-pressed]',
+  };
+
   let pinned          = false;
   let lockedVP        = null;  // ytd-video-preview element being protected
   let guardedVideo    = null;
@@ -94,13 +104,13 @@
   // ---- Helpers -------------------------------------------------------------
 
   function getVideo() {
-    return document.querySelector('ytd-video-preview video');
+    return document.querySelector(YT.PREVIEW_VIDEO);
   }
 
   function getPlayer() {
-    const vp = document.querySelector('ytd-video-preview');
+    const vp = document.querySelector(YT.PREVIEW);
     if (!vp) return null;
-    const yp = vp.querySelector('ytd-player');
+    const yp = vp.querySelector(YT.PLAYER);
     if (yp && typeof yp.getPlayer === 'function') {
       const p = yp.getPlayer(); if (p) return p;
     }
@@ -114,8 +124,8 @@
 
   function disableCaptions() {
     const btn =
-      document.querySelector('ytd-video-preview .ytmClosedCaptioningButtonButton') ??
-      [...document.querySelectorAll('ytd-video-preview button[aria-pressed]')]
+      document.querySelector(YT.CC_BUTTON) ??
+      [...document.querySelectorAll(YT.CC_BUTTON_PRESSED)]
         .find(b => /caption|subtitle/i.test(b.getAttribute('aria-label') ?? ''));
     if (btn?.getAttribute('aria-pressed') === 'true') btn.click();
   }
@@ -170,7 +180,7 @@
 
   document.addEventListener('ytpp-pin', (e) => {
     pinned   = true;
-    lockedVP = document.querySelector('ytd-video-preview');
+    lockedVP = document.querySelector(YT.PREVIEW);
 
     // Audio: unmute and ensure audible volume.
     try {

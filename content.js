@@ -1,15 +1,23 @@
 (function () {
   'use strict';
 
-  // Selectors for every video-card variant YouTube uses across page layouts.
-  const CARD_SELECTORS = [
-    'ytd-rich-item-renderer',
-    'ytd-video-renderer',
-    'ytd-grid-video-renderer',
-    'ytd-compact-video-renderer',
-    'ytd-rich-grid-media',
-    'ytd-reel-item-renderer',
-  ].join(',');
+  // YouTube DOM selectors. Centralized so any breakage from a YouTube rename
+  // surfaces in one place.
+  const YT = {
+    PREVIEW: 'ytd-video-preview',
+    CARDS: [
+      'ytd-rich-item-renderer',
+      'ytd-video-renderer',
+      'ytd-grid-video-renderer',
+      'ytd-compact-video-renderer',
+      'ytd-rich-grid-media',
+      'ytd-reel-item-renderer',
+    ].join(','),
+    SHORT_CARD: 'ytm-shorts-lockup-view-model, a[href*="/shorts/"]',
+  };
+
+  // Default values for chrome.storage.sync. Must match options.js.
+  const DEFAULTS = { disableCaptionsOnPin: true };
 
   // ---- State ---------------------------------------------------------------
 
@@ -25,12 +33,10 @@
 
   // ---- Utilities -----------------------------------------------------------
 
-  const getPreviewEl     = () => document.querySelector('ytd-video-preview');
+  const getPreviewEl     = () => document.querySelector(YT.PREVIEW);
   const isPreviewVisible = () => { const vp = getPreviewEl(); return vp && !vp.hasAttribute('hidden'); };
-  const findCard         = (el) => el?.closest?.(CARD_SELECTORS) ?? null;
-  const isShortCard      = (card) =>
-    !!card.querySelector('ytm-shorts-lockup-view-model') ||
-    !!card.querySelector('a[href*="/shorts/"]');
+  const findCard         = (el) => el?.closest?.(YT.CARDS) ?? null;
+  const isShortCard      = (card) => !!card.querySelector(YT.SHORT_CARD);
 
   // Fill up to 80% of the viewport width, capped at 1200 px.
   // naturalW is the element's offsetWidth *before* ytpp-pinned is applied.
@@ -54,9 +60,14 @@
 
   // ---- Preview card tracking -----------------------------------------------
 
+  // Capture-phase mouseenter fires for every nested element entry. Dedupe by
+  // the last card we processed so we only do work on actual card transitions.
+  let lastSeenCard = null;
   document.addEventListener('mouseenter', (e) => {
     if (pinnedCard) return;
     const card = findCard(e.target);
+    if (card === lastSeenCard) return;
+    lastSeenCard = card;
     if (!card) return;
     if (isShortCard(card)) {
       document.body.classList.add('ytpp-on-short');
@@ -86,12 +97,13 @@
   ensurePinButton();
   ensureControls();
 
-  // Re-inject buttons if YouTube reconstructs ytd-video-preview outside of
-  // a full navigation (e.g. player state changes, lazy DOM updates).
+  // Re-inject buttons if YouTube reconstructs the preview outside of a full
+  // navigation (e.g. player state changes, lazy DOM updates).
+  const PREVIEW_TAG = YT.PREVIEW.toUpperCase();
   new MutationObserver((mutations) => {
     for (const { addedNodes } of mutations) {
       for (const node of addedNodes) {
-        if (node.nodeType === 1 && node.tagName === 'YTD-VIDEO-PREVIEW') {
+        if (node.nodeType === 1 && node.tagName === PREVIEW_TAG) {
           ensurePinButton();
           ensureControls();
           return;
@@ -113,9 +125,9 @@
           el.removeAttribute('hidden');
         }
         if (attributeName === 'style') {
-          if (el.style.display    === 'none')   el.style.display    = '';
-          if (el.style.visibility === 'hidden') el.style.visibility = '';
-          if (el.style.opacity    === '0')      el.style.opacity    = '';
+          if (el.style.display    === 'none')       el.style.display    = '';
+          if (el.style.visibility === 'hidden')     el.style.visibility = '';
+          if (parseFloat(el.style.opacity) === 0)   el.style.opacity    = '';
         }
       }
     });
@@ -163,7 +175,7 @@
     document.dispatchEvent(new CustomEvent('ytpp-unpin'));
 
     pinnedCard.classList.remove('ytpp-pinned-card');
-    document.body.classList.remove('ytpp-active', 'ytpp-controls-active');
+    document.body.classList.remove('ytpp-active');
     pinnedCard     = null;
     pinnedNaturalW = 0;
     stopBlockingHidden();
@@ -195,8 +207,11 @@
         unpin();
       } else if (currentPreviewCard && isPreviewVisible()) {
         const card = currentPreviewCard;
-        chrome.storage.sync.get({ disableCaptionsOnPin: true }, ({ disableCaptionsOnPin }) => {
-          if (card === currentPreviewCard && document.contains(card) && isPreviewVisible()) pin(card, disableCaptionsOnPin);
+        chrome.storage.sync.get(DEFAULTS, (settings) => {
+          if (chrome.runtime.lastError) return;
+          if (card === currentPreviewCard && document.contains(card) && isPreviewVisible()) {
+            pin(card, settings.disableCaptionsOnPin);
+          }
         });
       }
       return;
@@ -239,12 +254,14 @@
   window.addEventListener('resize', () => {
     if (!pinnedCard || !pinnedNaturalW) return;
     document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW));
-  });
+  }, { passive: true });
 
   // SPA navigation: unpin and re-inject the button after YouTube rebuilds the DOM.
   document.addEventListener('yt-navigate-start', () => {
     unpin();
     document.body.classList.remove('ytpp-on-short');
+    currentPreviewCard = null;
+    lastSeenCard       = null;
   });
   document.addEventListener('yt-navigate-finish', () => {
     unpin();
