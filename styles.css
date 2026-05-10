@@ -134,7 +134,8 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
   transform-origin: top left;
 }
 
-.ytpp-unpin-btn {
+.ytpp-unpin-btn,
+.ytpp-pause-btn {
   background: rgba(20, 20, 20, 0.72);
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.55);
@@ -151,7 +152,8 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
   transition: background 0.15s;
 }
 
-.ytpp-unpin-btn:hover {
+.ytpp-unpin-btn:hover,
+.ytpp-pause-btn:hover {
   background: rgba(20, 20, 20, 0.88);
 }
 

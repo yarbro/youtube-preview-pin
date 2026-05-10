@@ -25,6 +25,7 @@
   let hiddenBlocker      = null;  // MutationObserver keeping the preview visible
   let currentPreviewCard = null;  // card whose preview is currently showing
   let pinnedNaturalW     = 0;     // unscaled offsetWidth recorded at pin time
+  let previewPaused      = false; // true when user has intentionally paused the preview
 
   // page_shim.js runs in world:"MAIN" at document_start (manifest.json).
   // We communicate via synchronous CustomEvent: dispatchEvent runs all handlers
@@ -53,6 +54,10 @@
 
   const controls = document.createElement('div');
   controls.id = 'ytpp-controls';
+  const pauseBtn = document.createElement('button');
+  pauseBtn.className = 'ytpp-pause-btn';
+  pauseBtn.textContent = '⏸ Pause';
+  controls.appendChild(pauseBtn);
   const unpinBtn = document.createElement('button');
   unpinBtn.className = 'ytpp-unpin-btn';
   unpinBtn.textContent = '📌 Unpin';
@@ -143,6 +148,16 @@
     hiddenBlocker = null;
   }
 
+  // ---- Pause state ---------------------------------------------------------
+
+  // Keeps previewPaused and the button label in sync. The matching CustomEvent
+  // is dispatched by the caller so unpin() can reset the label without
+  // re-triggering page_shim.js (ytpp-unpin already resets userPaused there).
+  function setPauseState(paused) {
+    previewPaused = paused;
+    pauseBtn.textContent = paused ? '▶ Play' : '⏸ Pause';
+  }
+
   // ---- Pin / Unpin ---------------------------------------------------------
 
   function pin(card, disableCaptions = true) {
@@ -178,6 +193,7 @@
     document.body.classList.remove('ytpp-active');
     pinnedCard     = null;
     pinnedNaturalW = 0;
+    setPauseState(false);
     stopBlockingHidden();
 
     const vp = getPreviewEl();
@@ -196,6 +212,16 @@
       e.stopPropagation();
       e.stopImmediatePropagation();
       unpin();
+      return;
+    }
+
+    if (e.target.closest?.('.ytpp-pause-btn')) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      const pausing = !previewPaused;
+      setPauseState(pausing);
+      document.dispatchEvent(new CustomEvent(pausing ? 'ytpp-pause' : 'ytpp-play'));
       return;
     }
 

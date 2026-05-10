@@ -18,7 +18,8 @@
  *    ensuring YouTube can't hide the preview element while pinned.
  *
  * 3. PLAYER CONTROL — Unmutes audio, simulates a CC button click to disable
- *    captions, and blocks video.pause while pinned.
+ *    captions, blocks video.pause while pinned, and handles user-initiated
+ *    pause/play via ytpp-pause / ytpp-play CustomEvents from content.js.
  */
 (function () {
   'use strict';
@@ -37,6 +38,7 @@
   let lockedVP        = null;  // ytd-video-preview element being protected
   let guardedVideo    = null;
   let pauseGuardFn    = null;
+  let userPaused      = false; // true when the user intentionally paused via the controls bar
 
   // ---- 1. EventTarget.prototype.addEventListener intercept ----------------
   // Installed before any YouTube script runs (guaranteed by document_start).
@@ -136,7 +138,7 @@
     if (video._ytppPatched) return;
     video._ytppPatched = true;
     video.pause = function () {
-      if (pinned) return Promise.resolve();
+      if (pinned && !userPaused) return Promise.resolve();
       return HTMLMediaElement.prototype.pause.call(this);
     };
   }
@@ -150,7 +152,7 @@
   function attachPauseGuard(video) {
     detachPauseGuard();
     guardedVideo = video;
-    pauseGuardFn = () => { if (pinned && !video.ended) video.play().catch(() => {}); };
+    pauseGuardFn = () => { if (pinned && !userPaused && !video.ended) video.play().catch(() => {}); };
     video.addEventListener('pause', pauseGuardFn);
   }
 
@@ -170,7 +172,7 @@
       if (!pinned || !lockedVP) return;
       if (lockedVP.hasAttribute('hidden')) Element.prototype.removeAttribute.call(lockedVP, 'hidden');
       const video = getVideo();
-      if (video?.paused && !video.ended) video.play().catch(() => {});
+      if (video?.paused && !video.ended && !userPaused) video.play().catch(() => {});
     });
   });
 
@@ -179,6 +181,7 @@
   // before the CSS class is applied and the element moves.
 
   document.addEventListener('ytpp-pin', (e) => {
+    userPaused = false;
     pinned   = true;
     lockedVP = document.querySelector(YT.PREVIEW);
 
@@ -211,8 +214,9 @@
   document.addEventListener('ytpp-unpin', () => {
     // Clear lockedVP before pinned=false so prototype guards don't race with
     // any YouTube-initiated setAttribute call that fires during cleanup.
-    lockedVP = null;
-    pinned   = false;
+    userPaused = false;
+    lockedVP   = null;
+    pinned     = false;
 
     try {
       const video = getVideo();
@@ -221,6 +225,26 @@
       const player = getPlayer();
       if (player?.mute) player.mute();
       else if (video) video.muted = true;
+    } catch (_) {}
+  });
+
+  // ---- 4. User-initiated pause / play --------------------------------------
+  // Dispatched by content.js when the user clicks the pause/play button.
+  // Setting userPaused first ensures patchPause and pauseGuardFn step aside.
+
+  document.addEventListener('ytpp-pause', () => {
+    userPaused = true;
+    try {
+      const video = getVideo();
+      if (video) HTMLMediaElement.prototype.pause.call(video);
+    } catch (_) {}
+  });
+
+  document.addEventListener('ytpp-play', () => {
+    userPaused = false;
+    try {
+      const video = getVideo();
+      if (video) video.play().catch(() => {});
     } catch (_) {}
   });
 
