@@ -6,10 +6,11 @@
  *
  * Responsibilities:
  *
- * 1. EVENT INTERCEPT — Wraps EventTarget.prototype.addEventListener before any
- *    YouTube script runs. While pinned, suppresses:
+ * 1. EVENT INTERCEPT — Wraps EventTarget.prototype.addEventListener and
+ *    ResizeObserver before any YouTube script runs. While pinned, suppresses:
  *    - mouseleave / mouseout on ytd-video-preview or its descendants
  *    - blur and resize on window
+ *    - all ResizeObserver callbacks
  *    This prevents Polymer's synchronous player teardown on cursor movement,
  *    window focus loss, and window resize.
  *
@@ -42,6 +43,21 @@
 
   // ---- 1. EventTarget.prototype.addEventListener intercept ----------------
   // Installed before any YouTube script runs (guaranteed by document_start).
+
+  // ResizeObserver intercept: suppress all observer callbacks while pinned so
+  // YouTube's layout-change handlers can't tear down the preview on window
+  // resize. Follows the same pattern as the addEventListener wrap below.
+  const _OrigResizeObserver = window.ResizeObserver;
+  if (_OrigResizeObserver) {
+    window.ResizeObserver = class ResizeObserver extends _OrigResizeObserver {
+      constructor(callback) {
+        super((entries, observer) => {
+          if (pinned) return;
+          callback(entries, observer);
+        });
+      }
+    };
+  }
 
   const _origAEL = EventTarget.prototype.addEventListener;
   EventTarget.prototype.addEventListener = function (type, handler, options) {
