@@ -119,6 +119,13 @@ ytd-video-preview.ytpp-pinned .ytpp-pin-btn {
   top: 20px;
   left: 20px;
   z-index: 10002;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.ytpp-controls-btns {
+  display: flex;
   flex-direction: row;
   gap: 8px;
   align-items: center;
@@ -157,8 +164,58 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
   background: rgba(20, 20, 20, 0.88);
 }
 
-/* ---- Hide YouTube player controls when pinned and not hovering ----------- */
-ytd-video-preview.ytpp-pinned yt-inline-player-controls {
+/* ---- Scrubber ------------------------------------------------------------- */
+.ytpp-scrubber-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  background: rgba(20, 20, 20, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-radius: 20px;
+  padding: 9px 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-sizing: border-box;
+}
+
+.ytpp-scrubber-label {
+  color: #fff;
+  font: 500 12px/1 'Roboto', Arial, sans-serif;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.ytpp-scrubber {
+  flex: 1;
+  min-width: 80px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.35);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  margin: 0;
+}
+
+.ytpp-scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* ---- Hide YouTube player controls and spinner when pinned and not hovering */
+ytd-video-preview.ytpp-pinned yt-inline-player-controls,
+ytd-video-preview.ytpp-pinned yt-spinner {
   opacity: 0 !important;
   pointer-events: none !important;
   transition: opacity 0.15s;

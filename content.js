@@ -4,7 +4,8 @@
   // YouTube DOM selectors. Centralized so any breakage from a YouTube rename
   // surfaces in one place.
   const YT = {
-    PREVIEW: 'ytd-video-preview',
+    PREVIEW:       'ytd-video-preview',
+    PREVIEW_VIDEO: 'ytd-video-preview video',
     CARDS: [
       'ytd-rich-item-renderer',
       'ytd-video-renderer',
@@ -26,6 +27,10 @@
   let currentPreviewCard = null;  // card whose preview is currently showing
   let pinnedNaturalW     = 0;     // unscaled offsetWidth recorded at pin time
   let previewPaused      = false; // true when user has intentionally paused the preview
+  let scrubVideo         = null;  // <video> element currently being scrubbed
+  let timeupdateFn       = null;  // timeupdate listener, kept for cleanup
+  let durationChangeFn   = null;  // durationchange listener, kept for cleanup
+  let scrubbing          = false; // true while user is dragging the scrubber
 
   // page_shim.js runs in world:"MAIN" at document_start (manifest.json).
   // We communicate via synchronous CustomEvent: dispatchEvent runs all handlers
@@ -54,14 +59,41 @@
 
   const controls = document.createElement('div');
   controls.id = 'ytpp-controls';
+  const controlsBtns = document.createElement('div');
+  controlsBtns.className = 'ytpp-controls-btns';
   const pauseBtn = document.createElement('button');
   pauseBtn.className = 'ytpp-pause-btn';
   pauseBtn.textContent = '⏸ Pause';
-  controls.appendChild(pauseBtn);
+  controlsBtns.appendChild(pauseBtn);
   const unpinBtn = document.createElement('button');
   unpinBtn.className = 'ytpp-unpin-btn';
   unpinBtn.textContent = '📌 Unpin';
-  controls.appendChild(unpinBtn);
+  controlsBtns.appendChild(unpinBtn);
+  controls.appendChild(controlsBtns);
+  const scrubberRow = document.createElement('div');
+  scrubberRow.className = 'ytpp-scrubber-row';
+  const scrubberLabel = document.createElement('span');
+  scrubberLabel.className = 'ytpp-scrubber-label';
+  scrubberLabel.textContent = '0:00';
+  scrubberRow.appendChild(scrubberLabel);
+  const scrubber = document.createElement('input');
+  scrubber.type      = 'range';
+  scrubber.className = 'ytpp-scrubber';
+  scrubber.min       = '0';
+  scrubber.max       = '1';
+  scrubber.step      = '0.001';
+  scrubber.value     = '0';
+  scrubberRow.appendChild(scrubber);
+  controls.appendChild(scrubberRow);
+
+  scrubber.addEventListener('mousedown', () => { scrubbing = true; });
+  scrubber.addEventListener('mouseup',   () => { scrubbing = false; });
+  scrubber.addEventListener('input', () => {
+    if (scrubVideo) {
+      scrubVideo.currentTime = parseFloat(scrubber.value);
+      scrubberLabel.textContent = formatTime(scrubVideo.currentTime);
+    }
+  });
 
   // ---- Preview card tracking -----------------------------------------------
 
@@ -148,6 +180,50 @@
     hiddenBlocker = null;
   }
 
+  // ---- Scrubber ------------------------------------------------------------
+
+  function formatTime(current) {
+    const t = Math.floor(current);
+    return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+  }
+
+  function attachScrubber() {
+    const video = document.querySelector(YT.PREVIEW_VIDEO);
+    if (!video) return;
+    scrubVideo = video;
+    if (isFinite(video.duration)) scrubber.max = String(video.duration);
+    scrubber.value = String(video.currentTime);
+    scrubberLabel.textContent = formatTime(video.currentTime);
+    timeupdateFn = () => {
+      if (!scrubbing) {
+        scrubber.value = String(scrubVideo.currentTime);
+        scrubberLabel.textContent = formatTime(scrubVideo.currentTime);
+      }
+    };
+    durationChangeFn = () => {
+      if (isFinite(scrubVideo?.duration)) {
+        scrubber.max = String(scrubVideo.duration);
+        scrubberLabel.textContent = formatTime(scrubVideo.currentTime);
+      }
+    };
+    video.addEventListener('timeupdate',     timeupdateFn);
+    video.addEventListener('durationchange', durationChangeFn);
+  }
+
+  function detachScrubber() {
+    if (scrubVideo) {
+      if (timeupdateFn)     scrubVideo.removeEventListener('timeupdate',     timeupdateFn);
+      if (durationChangeFn) scrubVideo.removeEventListener('durationchange', durationChangeFn);
+    }
+    scrubVideo                = null;
+    timeupdateFn              = null;
+    durationChangeFn          = null;
+    scrubbing                 = false;
+    scrubber.value            = '0';
+    scrubber.max              = '1';
+    scrubberLabel.textContent = '0:00';
+  }
+
   // ---- Pause state ---------------------------------------------------------
 
   // Keeps previewPaused and the button label in sync. The matching CustomEvent
@@ -180,6 +256,7 @@
     document.body.classList.add('ytpp-active');
     vp.classList.add('ytpp-pinned');
     startBlockingHidden(vp);
+    attachScrubber();
   }
 
   function unpin() {
@@ -194,6 +271,7 @@
     pinnedCard     = null;
     pinnedNaturalW = 0;
     setPauseState(false);
+    detachScrubber();
     stopBlockingHidden();
 
     const vp = getPreviewEl();
