@@ -119,6 +119,23 @@
     });
   }
 
+  // video.muted = true also goes through C++ WebIDL. While pinned, block
+  // YouTube from re-muting the preview video after we unmute it on pin.
+  // guardedVideo is the specific <video> element we're protecting, so other
+  // video elements on the page (ads, etc.) are unaffected.
+  const _mutedDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
+  if (_mutedDesc?.set && _mutedDesc.configurable) {
+    Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
+      configurable: true,
+      enumerable:   _mutedDesc.enumerable,
+      get:          _mutedDesc.get,
+      set(v) {
+        if (pinned && v && this === guardedVideo) return;
+        _mutedDesc.set.call(this, v);
+      },
+    });
+  }
+
   // ---- Helpers -------------------------------------------------------------
 
   function getVideo() {
