@@ -76,7 +76,7 @@ body.ytpp-active ytd-video-preview {
   z-index: 10001;
   background: rgba(20, 20, 20, 0.82);
   color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  border: 1px solid transparent;
   border-radius: 20px;
   padding: 5px 13px;
   font: 500 12px/1.4 'Roboto', Arial, sans-serif;
@@ -89,6 +89,58 @@ body.ytpp-active ytd-video-preview {
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Animated gradient border. The pseudo fills the parent's box with the
+ * gradient, then a two-layer mask (content-box vs border-box, composited
+ * with XOR) erases everything except the 1 px ring at the edge — so only
+ * the border area is painted, not the area behind the parent. inset: -1px
+ * makes the pseudo's outer edge align with the parent's border slot.
+ *
+ * Shared between the pin button (always-on) and the hover state of the
+ * unpin/pause buttons and scrubber row. */
+.ytpp-pin-btn::before,
+.ytpp-unpin-btn::before,
+.ytpp-pause-btn::before,
+.ytpp-scrubber-row::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6, #a855f7, #8b5cf6, #3b82f6);
+  background-size: 200% 100%;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.ytpp-pin-btn::before {
+  animation: ytpp-pin-border-shift 4s linear infinite;
+}
+
+.ytpp-unpin-btn::before,
+.ytpp-pause-btn::before,
+.ytpp-scrubber-row::before {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.ytpp-unpin-btn:hover::before,
+.ytpp-pause-btn:hover::before,
+.ytpp-scrubber-row:hover::before {
+  opacity: 1;
+  animation: ytpp-pin-border-shift 4s linear infinite;
+}
+
+@keyframes ytpp-pin-border-shift {
+  0%   { background-position:   0% 50%; }
+  100% { background-position: 200% 50%; }
 }
 
 ytd-video-preview:not([hidden]):hover .ytpp-pin-btn {
@@ -143,20 +195,30 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
 
 .ytpp-unpin-btn,
 .ytpp-pause-btn {
+  position: relative;
   background: rgba(20, 20, 20, 0.72);
   color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 20px;
   padding: 9px 22px;
   font: 500 14px/1.4 'Roboto', Arial, sans-serif;
   letter-spacing: 0.2px;
   cursor: pointer;
   white-space: nowrap;
+  text-align: center;
   margin: 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   transition: background 0.15s;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Pin a min-width on the pause/play toggle so the button doesn't jiggle as
+ * the label switches between "⏸ Pause" and "▶ Play". */
+.ytpp-pause-btn {
+  min-width: 100px;
 }
 
 .ytpp-unpin-btn:hover,
@@ -166,14 +228,15 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
 
 /* ---- Scrubber ------------------------------------------------------------- */
 .ytpp-scrubber-row {
+  position: relative;
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 10px;
-  margin-top: 6px;
   background: rgba(20, 20, 20, 0.72);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 20px;
   padding: 9px 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
@@ -187,6 +250,8 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
   white-space: nowrap;
   opacity: 0.85;
   flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .ytpp-scrubber {
