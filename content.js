@@ -1,8 +1,6 @@
 (function () {
   'use strict';
 
-  // YouTube DOM selectors. Centralized so any breakage from a YouTube rename
-  // surfaces in one place.
   const YT = {
     PREVIEW:       'ytd-video-preview',
     PREVIEW_VIDEO: 'ytd-video-preview video',
@@ -17,25 +15,29 @@
     SHORT_CARD: 'ytm-shorts-lockup-view-model, a[href*="/shorts/"]',
   };
 
-  // Default values for chrome.storage.sync. Must match options.js.
+  // Must match options.js.
   const DEFAULTS = { disableCaptionsOnPin: true };
+
+  // page_shim.js runs in world:"MAIN" at document_start. We communicate via
+  // synchronous CustomEvents — dispatchEvent runs all handlers inline so
+  // page_shim.js state is set before the CSS change that moves the preview.
 
   // ---- State ---------------------------------------------------------------
 
-  let pinnedCard         = null;  // card element currently pinned
-  let hiddenBlocker      = null;  // MutationObserver keeping the preview visible
-  let currentPreviewCard = null;  // card whose preview is currently showing
-  let pinnedNaturalW     = 0;     // unscaled offsetWidth recorded at pin time
-  let previewPaused      = false; // true when user has intentionally paused the preview
-  let scrubVideo         = null;  // <video> element currently being scrubbed
-  let timeupdateFn       = null;  // timeupdate listener, kept for cleanup
-  let durationChangeFn   = null;  // durationchange listener, kept for cleanup
-  let scrubbing          = false; // true while user is dragging the scrubber
-
-  // page_shim.js runs in world:"MAIN" at document_start (manifest.json).
-  // We communicate via synchronous CustomEvent: dispatchEvent runs all handlers
-  // inline before returning, ensuring page_shim.js state is set before any CSS
-  // change that might move ytd-video-preview under the cursor.
+  let pinnedCard         = null;
+  let hiddenBlocker      = null;
+  let currentPreviewCard = null;
+  let pinnedNaturalW     = 0;
+  let previewPaused      = false;
+  let scrubVideo         = null;
+  let timeupdateFn       = null;
+  let durationChangeFn   = null;
+  let videoEndedFn       = null;
+  let seekingContentFn   = null;
+  let scrubbing          = false;
+  let scrubEndThreshold  = Infinity; // VOD duration at pin time; Infinity for live
+  let lastKnownTime      = 0;
+  let scrubAliveRafId    = null;
 
   // ---- Utilities -----------------------------------------------------------
 
@@ -44,11 +46,15 @@
   const findCard         = (el) => el?.closest?.(YT.CARDS) ?? null;
   const isShortCard      = (card) => !!card.querySelector(YT.SHORT_CARD);
 
-  // Fill up to 80% of the viewport width, capped at 1200 px.
-  // naturalW is the element's offsetWidth *before* ytpp-pinned is applied.
+  // naturalW is offsetWidth before ytpp-pinned applies position:fixed.
   function computePinScale(naturalW) {
     const targetW = Math.min(window.innerWidth * 0.80, 1200);
     return Math.max(1.1, targetW / naturalW);
+  }
+
+  function formatTime(seconds) {
+    const t = Math.floor(seconds);
+    return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
   }
 
   // ---- DOM setup -----------------------------------------------------------
@@ -59,6 +65,7 @@
 
   const controls = document.createElement('div');
   controls.id = 'ytpp-controls';
+
   const controlsBtns = document.createElement('div');
   controlsBtns.className = 'ytpp-controls-btns';
   const pauseBtn = document.createElement('button');
@@ -70,6 +77,7 @@
   unpinBtn.textContent = '📌 Unpin';
   controlsBtns.appendChild(unpinBtn);
   controls.appendChild(controlsBtns);
+
   const scrubberRow = document.createElement('div');
   scrubberRow.className = 'ytpp-scrubber-row';
   const scrubberLabel = document.createElement('span');
@@ -86,19 +94,52 @@
   scrubberRow.appendChild(scrubber);
   controls.appendChild(scrubberRow);
 
-  scrubber.addEventListener('mousedown', () => { scrubbing = true; });
-  scrubber.addEventListener('mouseup',   () => { scrubbing = false; });
+  // ---- Input handlers ------------------------------------------------------
+
+  // Track whether the most recent mousedown started inside the preview so
+  // we can distinguish a drag-off release from a real backdrop click.
+  let mousedownInsidePreview = false;
+
+  scrubber.addEventListener('mousedown', () => {
+    scrubbing = true;
+    document.dispatchEvent(new CustomEvent('ytpp-scrub-start'));
+  });
+
+  document.addEventListener('mousedown', (e) => {
+    if (!pinnedCard) return;
+    const vp = getPreviewEl();
+    mousedownInsidePreview = !!(vp?.contains(e.target) || controls.contains(e.target));
+  }, true);
+
+  // Capture-phase so this catches releases outside the scrubber (drag-off).
+  document.addEventListener('mouseup', () => {
+    if (!scrubbing) return;
+    scrubbing = false;
+    document.dispatchEvent(new CustomEvent('ytpp-scrub-end'));
+  }, true);
+
   scrubber.addEventListener('input', () => {
-    if (scrubVideo) {
-      scrubVideo.currentTime = parseFloat(scrubber.value);
-      scrubberLabel.textContent = formatTime(scrubVideo.currentTime);
+    if (!scrubVideo) return;
+    scrubVideo.currentTime = parseFloat(scrubber.value);
+    scrubberLabel.textContent = formatTime(scrubVideo.currentTime);
+  });
+
+  // VOD: unpin when the scrubber is released at the end. 'ended' won't fire
+  // for a paused video at currentTime === duration, and calling play() there
+  // tears the player down before 'ended' can — so detect the release on the
+  // scrubber directly. scrubEndThreshold is Infinity for live, never matches.
+  scrubber.addEventListener('change', () => {
+    if (!pinnedCard) return;
+    if (parseFloat(scrubber.value) >= scrubEndThreshold - 1 ||
+        (scrubEndThreshold !== Infinity && scrubVideo?.ended)) {
+      unpin();
     }
   });
 
-  // ---- Preview card tracking -----------------------------------------------
+  // ---- Preview-card tracking -----------------------------------------------
 
-  // Capture-phase mouseenter fires for every nested element entry. Dedupe by
-  // the last card we processed so we only do work on actual card transitions.
+  // Capture-phase mouseenter fires for every nested entry. Dedupe so we
+  // only react on actual card transitions.
   let lastSeenCard = null;
   document.addEventListener('mouseenter', (e) => {
     if (pinnedCard) return;
@@ -114,7 +155,7 @@
     }
   }, true);
 
-  // ---- Pin button ----------------------------------------------------------
+  // ---- Button injection ----------------------------------------------------
 
   function ensurePinButton() {
     const vp = getPreviewEl();
@@ -134,8 +175,8 @@
   ensurePinButton();
   ensureControls();
 
-  // Re-inject buttons if YouTube reconstructs the preview outside of a full
-  // navigation (e.g. player state changes, lazy DOM updates).
+  // YouTube reconstructs the preview outside of a full navigation (lazy DOM
+  // updates), so re-inject buttons whenever a new preview appears.
   const PREVIEW_TAG = YT.PREVIEW.toUpperCase();
   new MutationObserver((mutations) => {
     for (const { addedNodes } of mutations) {
@@ -143,35 +184,60 @@
         if (node.nodeType === 1 && node.tagName === PREVIEW_TAG) {
           ensurePinButton();
           ensureControls();
-          return;
         }
       }
     }
   }).observe(document.body, { childList: true, subtree: true });
 
-  // ---- Hidden-attribute guard ----------------------------------------------
-  // Watches ytd-video-preview and all descendants
-  // for hidden / display:none / visibility:hidden / opacity:0 set via inline
-  // style and immediately reverts them while pinned.
+  // ---- Hidden-element guard ------------------------------------------------
+  // Reverts hidden / display:none / visibility:hidden / opacity:0 applied
+  // anywhere in the pinned preview subtree, and detects structural teardown
+  // (the inline player removing its own children) so we can unpin gracefully.
 
   function startBlockingHidden(vp) {
     stopBlockingHidden();
     hiddenBlocker = new MutationObserver((mutations) => {
-      for (const { attributeName, target: el } of mutations) {
+      for (const mut of mutations) {
+        if (mut.type === 'childList') {
+          let teardownTag = false;
+          for (const n of mut.removedNodes) {
+            if (n.nodeType !== 1) continue;
+            if (n.tagName === 'YT-PROGRESS-BAR' ||
+                n.tagName === 'YTD-PLAYER'      ||
+                n.tagName === 'YTD-THUMBNAIL') {
+              teardownTag = true;
+              break;
+            }
+          }
+          // Only treat as teardown for VOD; ignore during a scrub drag, when
+          // seek-induced element churn is expected.
+          if (pinnedCard && scrubEndThreshold !== Infinity && !scrubbing && teardownTag) {
+            unpin();
+            return;
+          }
+          if (!scrubbing && scrubVideo && !scrubVideo.isConnected &&
+              lastKnownTime >= scrubEndThreshold - 0.5) {
+            unpin();
+            return;
+          }
+          continue;
+        }
+        const { attributeName, target: el } = mut;
         if (attributeName === 'hidden' && el.hasAttribute('hidden')) {
           el.removeAttribute('hidden');
         }
         if (attributeName === 'style') {
-          if (el.style.display    === 'none')       el.style.display    = '';
-          if (el.style.visibility === 'hidden')     el.style.visibility = '';
-          if (parseFloat(el.style.opacity) === 0)   el.style.opacity    = '';
+          if (el.style.display    === 'none')      el.style.display    = '';
+          if (el.style.visibility === 'hidden')    el.style.visibility = '';
+          if (parseFloat(el.style.opacity) === 0)  el.style.opacity    = '';
         }
       }
     });
     hiddenBlocker.observe(vp, {
-      attributes: true,
+      attributes:      true,
       attributeFilter: ['hidden', 'style'],
-      subtree: true,
+      childList:       true,
+      subtree:         true,
     });
   }
 
@@ -182,59 +248,116 @@
 
   // ---- Scrubber ------------------------------------------------------------
 
-  function formatTime(current) {
-    const t = Math.floor(current);
-    return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
-  }
-
-  function attachScrubber() {
+  function attachScrubber(isLive) {
     const video = document.querySelector(YT.PREVIEW_VIDEO);
     if (!video) return;
     scrubVideo = video;
-    if (isFinite(video.duration)) scrubber.max = String(video.duration);
+
+    // VOD: full duration; Live: the seekable DVR window, which advances in
+    // real time so we re-sync on every timeupdate.
+    function syncRange() {
+      if (isLive) {
+        const s = scrubVideo.seekable;
+        if (s.length > 0) {
+          scrubber.min = String(s.start(0));
+          scrubber.max = String(s.end(s.length - 1));
+        }
+      } else if (isFinite(scrubVideo.duration)) {
+        // Stop 1 s short of the end so dragging into the teardown zone is
+        // impossible. The final second plays out naturally and videoEndedFn
+        // handles the unpin.
+        scrubber.max = String(Math.max(0, scrubVideo.duration - 1));
+      }
+    }
+
+    // Captured at pin time so the change handler can still detect a
+    // scrub-to-end even if YouTube has destroyed the video element by then.
+    scrubEndThreshold = isLive ? Infinity : (isFinite(video.duration) ? video.duration : Infinity);
+
+    syncRange();
     scrubber.value = String(video.currentTime);
     scrubberLabel.textContent = formatTime(video.currentTime);
+
+    // 'seeking' fires with the target before timeupdate catches up, so this
+    // keeps lastKnownTime current right up to the moment of teardown.
+    seekingContentFn = () => { lastKnownTime = video.currentTime; };
+    video.addEventListener('seeking', seekingContentFn);
+
     timeupdateFn = () => {
+      lastKnownTime = scrubVideo.currentTime;
+      if (isLive) syncRange();
       if (!scrubbing) {
         scrubber.value = String(scrubVideo.currentTime);
         scrubberLabel.textContent = formatTime(scrubVideo.currentTime);
       }
     };
+
     durationChangeFn = () => {
-      if (isFinite(scrubVideo?.duration)) {
-        scrubber.max = String(scrubVideo.duration);
-        scrubberLabel.textContent = formatTime(scrubVideo.currentTime);
+      syncRange();
+      // duration may have been NaN at pin time — backfill the threshold now.
+      if (!isLive && isFinite(scrubVideo.duration) && scrubEndThreshold === Infinity) {
+        scrubEndThreshold = scrubVideo.duration;
       }
     };
+
+    videoEndedFn = () => {
+      if (isLive) {
+        // Live edge reached: seek back 3 s so there's buffered content.
+        const s = scrubVideo?.seekable;
+        if (s?.length > 0) scrubVideo.currentTime = Math.max(s.start(0), s.end(s.length - 1) - 3);
+      } else if (!scrubbing) {
+        unpin();
+      }
+    };
+
     video.addEventListener('timeupdate',     timeupdateFn);
     video.addEventListener('durationchange', durationChangeFn);
+    video.addEventListener('ended',          videoEndedFn);
+
+    // After a seek to the end of a VOD, 'ended' and 'seeked' may never fire
+    // — the video element gets removed (or its parent replaced) first. Poll
+    // for disconnection as a fallback.
+    const aliveCheck = () => {
+      if (!scrubVideo) { scrubAliveRafId = null; return; }
+      if (!scrubbing && !scrubVideo.isConnected && lastKnownTime >= scrubEndThreshold - 0.5) {
+        scrubAliveRafId = null;
+        unpin();
+        return;
+      }
+      scrubAliveRafId = requestAnimationFrame(aliveCheck);
+    };
+    scrubAliveRafId = requestAnimationFrame(aliveCheck);
   }
 
   function detachScrubber() {
+    if (scrubAliveRafId !== null) cancelAnimationFrame(scrubAliveRafId);
     if (scrubVideo) {
       if (timeupdateFn)     scrubVideo.removeEventListener('timeupdate',     timeupdateFn);
       if (durationChangeFn) scrubVideo.removeEventListener('durationchange', durationChangeFn);
+      if (videoEndedFn)     scrubVideo.removeEventListener('ended',          videoEndedFn);
+      if (seekingContentFn) scrubVideo.removeEventListener('seeking',        seekingContentFn);
     }
     scrubVideo                = null;
     timeupdateFn              = null;
     durationChangeFn          = null;
+    videoEndedFn              = null;
+    seekingContentFn          = null;
+    scrubAliveRafId           = null;
     scrubbing                 = false;
+    scrubEndThreshold         = Infinity;
+    lastKnownTime             = 0;
+    scrubber.min              = '0';
     scrubber.value            = '0';
     scrubber.max              = '1';
     scrubberLabel.textContent = '0:00';
   }
 
-  // ---- Pause state ---------------------------------------------------------
+  // ---- Pin / Unpin ---------------------------------------------------------
 
-  // Keeps previewPaused and the button label in sync. The matching CustomEvent
-  // is dispatched by the caller so unpin() can reset the label without
-  // re-triggering page_shim.js (ytpp-unpin already resets userPaused there).
   function setPauseState(paused) {
     previewPaused = paused;
     pauseBtn.textContent = paused ? '▶ Play' : '⏸ Pause';
   }
-
-  // ---- Pin / Unpin ---------------------------------------------------------
 
   function pin(card, disableCaptions = true) {
     if (pinnedCard === card) return;
@@ -246,24 +369,29 @@
     pinnedCard = card;
     card.classList.add('ytpp-pinned-card');
 
-    // Arm page_shim.js synchronously BEFORE the element moves.
-    document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions } }));
+    // YouTube reports a finite duration even for live previews, so detect
+    // live from the LIVE badge on the card instead.
+    const isLive = !!card.querySelector('.ytBadgeShapeThumbnailLive');
 
-    // Measure before ytpp-pinned so position:fixed doesn't change the width.
+    // Arm page_shim.js synchronously before the element moves.
+    document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions, isLive } }));
+
+    // Measure before ytpp-pinned applies position:fixed (which would change
+    // the width).
     pinnedNaturalW = vp.offsetWidth || Math.round(window.innerWidth * 0.25);
     document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW));
 
     document.body.classList.add('ytpp-active');
     vp.classList.add('ytpp-pinned');
     startBlockingHidden(vp);
-    attachScrubber();
+    attachScrubber(isLive);
   }
 
   function unpin() {
     if (!pinnedCard) return;
 
-    // Disarm page_shim.js BEFORE removing CSS classes so any mouseleave that
-    // fires when the element snaps back doesn't hit the guard on stale state.
+    // Disarm page_shim.js before removing CSS classes so a mouseleave fired
+    // by the element snapping back doesn't hit stale guard state.
     document.dispatchEvent(new CustomEvent('ytpp-unpin'));
 
     pinnedCard.classList.remove('ytpp-pinned-card');
@@ -281,7 +409,6 @@
 
   // ---- Event listeners -----------------------------------------------------
 
-  // Pin / unpin via the injected button, or unpin by clicking the backdrop.
   document.addEventListener('click', (e) => {
     if (e.button !== 0) return;
 
@@ -323,20 +450,25 @@
 
     if (pinnedCard) {
       const vp = getPreviewEl();
-      if (!pinnedCard.contains(e.target) && !vp?.contains(e.target)) {
-        // Stop propagation so YouTube doesn't see a click on our backdrop element
-        // and corrupt state, preventing the next pin attempt from working.
+      const inCard     = pinnedCard.contains(e.target);
+      const inVp       = vp?.contains(e.target) ?? false;
+      const inControls = controls.contains(e.target);
+      if (!inCard && !inVp && !inControls) {
+        // If the mousedown started inside the preview this click is the end
+        // of a drag-off, not a real backdrop click — swallow it.
+        const draggedOff = mousedownInsidePreview;
+        mousedownInsidePreview = false;
+        if (draggedOff) return;
         e.stopPropagation();
         e.preventDefault();
         unpin();
       }
-      return;
     }
   }, true);
 
-  // Secondary JS guard against YouTube's hover handlers on non-pinned cards.
-  // CSS pointer-events:none on those cards is the primary guard; this covers
-  // any events that still slip through.
+  // CSS pointer-events:none is the primary guard against hover events on
+  // non-pinned cards; this is the JS belt-and-suspenders for anything that
+  // slips through.
   for (const type of ['mouseenter', 'mouseover']) {
     document.addEventListener(type, (e) => {
       if (!pinnedCard) return;
@@ -345,7 +477,6 @@
     }, true);
   }
 
-  // Escape key unpins.
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && pinnedCard) {
       e.preventDefault();
@@ -353,20 +484,27 @@
     }
   });
 
-  // Resize: recompute scale using the stored natural width so we never need to
-  // remove ytpp-pinned (which would disturb YouTube's player state).
+  // Recompute scale on resize using the stored natural width — we never want
+  // to remove ytpp-pinned, which would disturb YouTube's player state.
   window.addEventListener('resize', () => {
     if (!pinnedCard || !pinnedNaturalW) return;
     document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW));
   }, { passive: true });
 
-  // SPA navigation: unpin and re-inject the button after YouTube rebuilds the DOM.
+  // Fired by page_shim.js when a VOD seek lands at the end — 'ended' doesn't
+  // fire for a paused video sitting at duration, so this is the signal.
+  document.addEventListener('ytpp-vod-ended', () => {
+    if (scrubbing) return;
+    unpin();
+  });
+
   document.addEventListener('yt-navigate-start', () => {
     unpin();
     document.body.classList.remove('ytpp-on-short');
     currentPreviewCard = null;
     lastSeenCard       = null;
   });
+
   document.addEventListener('yt-navigate-finish', () => {
     unpin();
     ensurePinButton();

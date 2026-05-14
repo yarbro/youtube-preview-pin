@@ -213,9 +213,9 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 }
 
-/* ---- Hide YouTube player controls and spinner when pinned and not hovering */
+/* ---- Hide YouTube player controls and loading spinner when pinned and not hovering */
 ytd-video-preview.ytpp-pinned yt-inline-player-controls,
-ytd-video-preview.ytpp-pinned yt-spinner {
+ytd-video-preview.ytpp-pinned .ytp-spinner-container {
   opacity: 0 !important;
   pointer-events: none !important;
   transition: opacity 0.15s;

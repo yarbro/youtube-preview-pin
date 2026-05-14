@@ -1,32 +1,10 @@
-/**
- * page_shim.js — runs in the PAGE's JS realm at document_start (world: "MAIN").
- *
- * Injected by Chrome via manifest.json. Communicates with content.js via
- * synchronous CustomEvents dispatched on document (ytpp-pin / ytpp-unpin).
- *
- * Responsibilities:
- *
- * 1. EVENT INTERCEPT — Wraps EventTarget.prototype.addEventListener and
- *    ResizeObserver before any YouTube script runs. While pinned, suppresses:
- *    - mouseleave / mouseout on ytd-video-preview or its descendants
- *    - blur and resize on window
- *    - all ResizeObserver callbacks
- *    This prevents Polymer's synchronous player teardown on cursor movement,
- *    window focus loss, and window resize.
- *
- * 2. ATTRIBUTE GUARD — Prototype-level overrides block setAttribute('hidden'),
- *    toggleAttribute('hidden'), and the hidden IDL setter on the locked element,
- *    ensuring YouTube can't hide the preview element while pinned.
- *
- * 3. PLAYER CONTROL — Unmutes audio, simulates a CC button click to disable
- *    captions, blocks video.pause while pinned, and handles user-initiated
- *    pause/play via ytpp-pause / ytpp-play CustomEvents from content.js.
- */
+// Runs in world:"MAIN" at document_start (manifest.json). Communicates with
+// content.js via synchronous CustomEvents on document. Wraps a handful of
+// event-target and WebIDL APIs before any YouTube script runs so YouTube
+// can't tear the inline player down while pinned.
 (function () {
   'use strict';
 
-  // YouTube DOM selectors. Centralized so any breakage from a YouTube rename
-  // surfaces in one place.
   const YT = {
     PREVIEW:           'ytd-video-preview',
     PREVIEW_VIDEO:     'ytd-video-preview video',
@@ -35,26 +13,27 @@
     CC_BUTTON_PRESSED: 'ytd-video-preview button[aria-pressed]',
   };
 
-  let pinned          = false;
-  let lockedVP        = null;  // ytd-video-preview element being protected
-  let guardedVideo    = null;
-  let pauseGuardFn    = null;
-  let userPaused      = false; // true when the user intentionally paused via the controls bar
+  let pinned           = false;
+  let pinnedIsLive     = false;
+  let lockedVP         = null;
+  let guardedVideo     = null;
+  let userPaused       = false;
+  let pausedForScrub   = false;
+  let seekInProgress   = false;
+  let pauseGuardFn     = null;
+  let seekingFn        = null;
+  let seekedFn         = null;
+  let userInteractedAt    = 0; // performance.now() of the last user input inside the preview
+  let captionObserver     = null;
+  let userToggledCaptions = false; // sticky: once the user touches CC, stop auto-disabling
 
-  // ---- 1. EventTarget.prototype.addEventListener intercept ----------------
-  // Installed before any YouTube script runs (guaranteed by document_start).
+  // ---- EventTarget / ResizeObserver wrap -----------------------------------
 
-  // ResizeObserver intercept: suppress all observer callbacks while pinned so
-  // YouTube's layout-change handlers can't tear down the preview on window
-  // resize. Follows the same pattern as the addEventListener wrap below.
   const _OrigResizeObserver = window.ResizeObserver;
   if (_OrigResizeObserver) {
-    window.ResizeObserver = class ResizeObserver extends _OrigResizeObserver {
+    window.ResizeObserver = class extends _OrigResizeObserver {
       constructor(callback) {
-        super((entries, observer) => {
-          if (pinned) return;
-          callback(entries, observer);
-        });
+        super((entries, observer) => { if (!pinned) callback(entries, observer); });
       }
     };
   }
@@ -64,25 +43,32 @@
     if (typeof handler !== 'function') {
       return _origAEL.call(this, type, handler, options);
     }
-
     const self = this;
 
-    // Suppress YouTube's window-level blur and resize handlers while pinned.
-    // Our own resize listener lives in the isolated content-script world and
-    // uses a separate EventTarget.prototype, so it is unaffected.
+    // window blur/resize: YouTube uses these to tear the player down. Our own
+    // resize listener is in the isolated world and uses a different prototype.
     if (type === 'blur' || type === 'resize') {
-      return _origAEL.call(this, type, function ytppWindowWrap(e) {
+      return _origAEL.call(this, type, function (e) {
         if (pinned && self === window) return;
         return handler.call(this, e);
       }, options);
     }
 
-    // Suppress mouseleave / mouseout that target ytd-video-preview or any
-    // of its descendants while pinned. node.contains(node) returns true for
-    // the node itself, so this single check covers both cases.
+    // mouseleave/mouseout inside the locked preview triggers Polymer's
+    // synchronous player teardown. node.contains(node) is true for self.
     if (type === 'mouseleave' || type === 'mouseout') {
-      return _origAEL.call(this, type, function ytppMouseWrap(e) {
+      return _origAEL.call(this, type, function (e) {
         if (pinned && lockedVP?.contains(e.target)) return;
+        return handler.call(this, e);
+      }, options);
+    }
+
+    // LIVE only: blocking 'waiting' stops YouTube from snapping back to the
+    // last buffered position on every unbuffered DVR scrub. VOD videos need
+    // 'waiting' so MediaSource.endOfStream() can run and fire 'ended'.
+    if (type === 'waiting') {
+      return _origAEL.call(this, type, function (e) {
+        if (pinned && pinnedIsLive && lockedVP?.contains(e.target)) return;
         return handler.call(this, e);
       }, options);
     }
@@ -90,11 +76,12 @@
     return _origAEL.call(this, type, handler, options);
   };
 
-  // ---- 2. Attribute guard -------------------------------------------------
+  // ---- Attribute / WebIDL guards -------------------------------------------
 
   const _origSetAttribute = Element.prototype.setAttribute;
   const _origToggleAttr   = Element.prototype.toggleAttribute;
   const _hiddenDesc       = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'hidden');
+  const _mutedDesc        = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
 
   Element.prototype.setAttribute = function (name, value) {
     if (this === lockedVP && pinned && name === 'hidden') return;
@@ -106,7 +93,7 @@
     return _origToggleAttr.call(this, name, force);
   };
 
-  // element.hidden = true goes through C++ WebIDL, not through setAttribute.
+  // element.hidden = true goes through WebIDL, bypassing setAttribute.
   if (_hiddenDesc?.set && _hiddenDesc.configurable) {
     Object.defineProperty(HTMLElement.prototype, 'hidden', {
       configurable: true,
@@ -119,22 +106,48 @@
     });
   }
 
-  // video.muted = true also goes through C++ WebIDL. While pinned, block
-  // YouTube from re-muting the preview video after we unmute it on pin.
-  // guardedVideo is the specific <video> element we're protecting, so other
-  // video elements on the page (ads, etc.) are unaffected.
-  const _mutedDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
+  // video.muted = true also goes through WebIDL. Block YouTube's automatic
+  // re-mutes on the video we've unmuted, but let user-initiated mutes through
+  // by gating on a recent input event (covers the native mute button and the
+  // 'm' keyboard shortcut). Other videos on the page (ads, etc.) are
+  // unaffected.
+  const USER_MUTE_WINDOW_MS = 300;
   if (_mutedDesc?.set && _mutedDesc.configurable) {
     Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
       configurable: true,
       enumerable:   _mutedDesc.enumerable,
       get:          _mutedDesc.get,
       set(v) {
-        if (pinned && v && this === guardedVideo) return;
+        if (pinned && v && this === guardedVideo &&
+            performance.now() - userInteractedAt > USER_MUTE_WINDOW_MS) return;
         _mutedDesc.set.call(this, v);
       },
     });
   }
+
+  // Stamp userInteractedAt on input events inside the preview so the muted
+  // setter above can tell user-driven mutes from YouTube's automatic ones.
+  // YouTube's keyboard shortcuts ('m', 'c') work document-wide, so keydown
+  // is tracked regardless of focus.
+  document.addEventListener('mousedown', (e) => {
+    if (pinned && lockedVP?.contains(e.target)) userInteractedAt = performance.now();
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (!pinned) return;
+    userInteractedAt = performance.now();
+    if (e.key === 'c' || e.key === 'C') userToggledCaptions = true;
+  }, true);
+
+  // Clicks on the native CC button update aria-pressed asynchronously (the
+  // caption module is sometimes loaded on demand), often well past the
+  // muted-guard window — so use a sticky flag for captions instead.
+  document.addEventListener('click', (e) => {
+    if (!pinned || !lockedVP?.contains(e.target)) return;
+    const btn = e.target.closest?.('button');
+    if (btn && /caption|subtitle/i.test(btn.getAttribute('aria-label') ?? '')) {
+      userToggledCaptions = true;
+    }
+  }, true);
 
   // ---- Helpers -------------------------------------------------------------
 
@@ -155,23 +168,93 @@
     return vp.playerApi ?? null;
   }
 
-  // ---- Caption blocking ----------------------------------------------------
-
-  function disableCaptions() {
-    const btn =
-      document.querySelector(YT.CC_BUTTON) ??
+  function findCaptionButton() {
+    return document.querySelector(YT.CC_BUTTON) ??
       [...document.querySelectorAll(YT.CC_BUTTON_PRESSED)]
         .find(b => /caption|subtitle/i.test(b.getAttribute('aria-label') ?? ''));
-    if (btn?.getAttribute('aria-pressed') === 'true') btn.click();
   }
 
-  // ---- Pause blocking ------------------------------------------------------
+  function disableCaptions() {
+    // Prefer the native CC button so its aria-pressed stays in sync with
+    // the actual captions state. Using only the player API leaves the
+    // button stuck on "pressed", and combining both makes the second call
+    // toggle captions back on.
+    const btn = findCaptionButton();
+    if (btn) {
+      if (btn.getAttribute('aria-pressed') === 'true') btn.click();
+      return;
+    }
+    // No CC button (some music videos): fall back to the player API.
+    try {
+      const player = getPlayer();
+      if (player) {
+        player.unloadModule?.('captions');
+        player.setOption?.('captions', 'track', {});
+      }
+    } catch (_) {}
+  }
+
+  // Some videos auto-enable captions after pin time (music videos in
+  // particular). Watch the pinned preview and re-disable on later auto-
+  // activations, but step aside once the user has touched the CC control.
+  function startCaptionGuard() {
+    stopCaptionGuard();
+    if (!lockedVP) return;
+    userToggledCaptions = false;
+    disableCaptions();
+    captionObserver = new MutationObserver((mutations) => {
+      if (userToggledCaptions) return;
+      for (const mut of mutations) {
+        const el = mut.target;
+        if (mut.attributeName === 'aria-pressed' &&
+            el.getAttribute?.('aria-pressed') === 'true' &&
+            /caption|subtitle/i.test(el.getAttribute?.('aria-label') ?? '')) {
+          try { disableCaptions(); } catch (_) {}
+          return;
+        }
+      }
+    });
+    captionObserver.observe(lockedVP, {
+      attributes:      true,
+      attributeFilter: ['aria-pressed'],
+      subtree:         true,
+    });
+  }
+
+  function stopCaptionGuard() {
+    captionObserver?.disconnect();
+    captionObserver = null;
+  }
+
+  function unmute() {
+    const player = getPlayer();
+    if (player) {
+      player.unMute?.();
+      const vol = player.getVolume?.() ?? 0;
+      if (vol < 5) player.setVolume?.(50);
+      return;
+    }
+    const video = getVideo();
+    if (video) {
+      video.muted = false;
+      if (video.volume < 0.1) video.volume = 0.5;
+    }
+  }
+
+  function mute() {
+    const player = getPlayer();
+    if (player?.mute) { player.mute(); return; }
+    const video = getVideo();
+    if (video) video.muted = true;
+  }
+
+  // ---- Pause / seek guards -------------------------------------------------
 
   function patchPause(video) {
     if (video._ytppPatched) return;
     video._ytppPatched = true;
     video.pause = function () {
-      if (pinned && !userPaused) return Promise.resolve();
+      if (pinned && !userPaused && !seekInProgress) return Promise.resolve();
       return HTMLMediaElement.prototype.pause.call(this);
     };
   }
@@ -185,19 +268,57 @@
   function attachPauseGuard(video) {
     detachPauseGuard();
     guardedVideo = video;
-    pauseGuardFn = () => { if (pinned && !userPaused && !video.ended) video.play().catch(() => {}); };
+
+    pauseGuardFn = () => {
+      if (!pinned || userPaused || pausedForScrub || video.ended) return;
+      // VOD seek-to-end fires 'pause' before YouTube destroys the player —
+      // 'seeked' often never arrives, so use 'pause' as the unpin signal.
+      if (!pinnedIsLive && isFinite(video.duration) && video.currentTime >= video.duration - 0.1) {
+        document.dispatchEvent(new CustomEvent('ytpp-vod-ended'));
+        return;
+      }
+      if (seekInProgress) return;
+      video.play().catch(() => {});
+    };
+
+    seekingFn = () => { seekInProgress = true; };
+
+    seekedFn = () => {
+      seekInProgress = false;
+      if (pinned && !pinnedIsLive && isFinite(video.duration) && video.currentTime >= video.duration - 0.1) {
+        document.dispatchEvent(new CustomEvent('ytpp-vod-ended'));
+        return;
+      }
+      // Skip auto-resume while pausedForScrub so the drag-pause persists
+      // across the seeks fired by every scrubber 'input' event.
+      if (pinned && !userPaused && !pausedForScrub && video.paused && !video.ended) {
+        video.play().catch(() => {});
+      }
+    };
+
     video.addEventListener('pause', pauseGuardFn);
+    // _origAEL: our own listeners must bypass the wrap above.
+    _origAEL.call(video, 'seeking', seekingFn);
+    _origAEL.call(video, 'seeked',  seekedFn);
   }
 
   function detachPauseGuard() {
-    if (guardedVideo && pauseGuardFn) guardedVideo.removeEventListener('pause', pauseGuardFn);
-    guardedVideo = null;
-    pauseGuardFn = null;
+    if (guardedVideo) {
+      if (pauseGuardFn) guardedVideo.removeEventListener('pause',   pauseGuardFn);
+      if (seekingFn)    guardedVideo.removeEventListener('seeking', seekingFn);
+      if (seekedFn)     guardedVideo.removeEventListener('seeked',  seekedFn);
+    }
+    guardedVideo   = null;
+    pauseGuardFn   = null;
+    seekingFn      = null;
+    seekedFn       = null;
+    seekInProgress = false;
   }
 
-  // ---- Recovery blur handler -----------------------------------------------
-  // Registered with _origAEL to bypass the wrapper that suppresses window-blur
-  // while pinned — this is our own recovery path, not YouTube's teardown.
+  // ---- Recovery ------------------------------------------------------------
+  // Window blur (alt-tab, etc.) — re-show the preview if YouTube hid it and
+  // resume playback if it got paused. Registered with _origAEL so it bypasses
+  // the wrapper that suppresses window-blur while pinned.
 
   _origAEL.call(window, 'blur', () => {
     if (!pinned || !lockedVP) return;
@@ -205,39 +326,26 @@
       if (!pinned || !lockedVP) return;
       if (lockedVP.hasAttribute('hidden')) Element.prototype.removeAttribute.call(lockedVP, 'hidden');
       const video = getVideo();
-      if (video?.paused && !video.ended && !userPaused) video.play().catch(() => {});
+      if (video?.paused && !video.ended && !userPaused && !pausedForScrub && !seekInProgress) {
+        video.play().catch(() => {});
+      }
     });
   });
 
-  // ---- 3. Pin / unpin handlers ---------------------------------------------
-  // Dispatched synchronously by content.js, ensuring pinned/lockedVP are set
-  // before the CSS class is applied and the element moves.
+  // ---- CustomEvent handlers ------------------------------------------------
+  // Dispatched synchronously from content.js so state is set before any CSS
+  // change that moves ytd-video-preview.
 
   document.addEventListener('ytpp-pin', (e) => {
-    userPaused = false;
-    pinned   = true;
-    lockedVP = document.querySelector(YT.PREVIEW);
+    userPaused       = false;
+    pausedForScrub   = false;
+    userInteractedAt = 0;
+    pinnedIsLive     = e.detail?.isLive === true;
+    pinned           = true;
+    lockedVP         = document.querySelector(YT.PREVIEW);
 
-    // Audio: unmute and ensure audible volume.
-    try {
-      const player = getPlayer();
-      if (player) {
-        player.unMute?.();
-        const vol = player.getVolume?.() ?? 0;
-        if (vol < 5) player.setVolume?.(50);
-      } else {
-        const video = getVideo();
-        if (video) {
-          video.muted = false;
-          if (video.volume < 0.1) video.volume = 0.5;
-        }
-      }
-    } catch (_) {}
-
-    // Captions: simulate the CC button click so YouTube records the preference.
-    if (e.detail?.disableCaptions) try { disableCaptions(); } catch (_) {}
-
-    // Pause protection: patch video.pause and add a 'pause' event guard.
+    try { unmute(); } catch (_) {}
+    if (e.detail?.disableCaptions) try { startCaptionGuard(); } catch (_) {}
     try {
       const video = getVideo();
       if (video) { patchPause(video); attachPauseGuard(video); }
@@ -245,25 +353,21 @@
   });
 
   document.addEventListener('ytpp-unpin', () => {
-    // Clear lockedVP before pinned=false so prototype guards don't race with
-    // any YouTube-initiated setAttribute call that fires during cleanup.
-    userPaused = false;
-    lockedVP   = null;
-    pinned     = false;
+    // Clear lockedVP before pinned=false so the prototype guards don't race
+    // with any cleanup-time setAttribute.
+    userPaused     = false;
+    pausedForScrub = false;
+    lockedVP       = null;
+    pinned         = false;
+    pinnedIsLive   = false;
 
     try {
-      const video = getVideo();
-      unpatchPause(video);
+      stopCaptionGuard();
+      unpatchPause(getVideo());
       detachPauseGuard();
-      const player = getPlayer();
-      if (player?.mute) player.mute();
-      else if (video) video.muted = true;
+      mute();
     } catch (_) {}
   });
-
-  // ---- 4. User-initiated pause / play --------------------------------------
-  // Dispatched by content.js when the user clicks the pause/play button.
-  // Setting userPaused first ensures patchPause and pauseGuardFn step aside.
 
   document.addEventListener('ytpp-pause', () => {
     userPaused = true;
@@ -278,6 +382,32 @@
     try {
       const video = getVideo();
       if (video) video.play().catch(() => {});
+    } catch (_) {}
+  });
+
+  // Pause the video at the HTMLMediaElement level for the duration of a
+  // scrub drag so natural playback can't carry currentTime into 'ended'
+  // (which makes YouTube reload the source and the element disappear).
+  // Prototype calls bypass our patched video.pause and YouTube's pause-
+  // aware handlers, so resume on release is effectively instantaneous.
+  document.addEventListener('ytpp-scrub-start', () => {
+    try {
+      const video = getVideo();
+      if (video && pinned && !userPaused && !video.paused && !video.ended) {
+        pausedForScrub = true;
+        HTMLMediaElement.prototype.pause.call(video);
+      }
+    } catch (_) {}
+  });
+
+  document.addEventListener('ytpp-scrub-end', () => {
+    if (!pausedForScrub) return;
+    pausedForScrub = false;
+    try {
+      const video = getVideo();
+      if (video && pinned && !userPaused && !video.ended) {
+        HTMLMediaElement.prototype.play.call(video).catch(() => {});
+      }
     } catch (_) {}
   });
 
