@@ -45,9 +45,9 @@ ytd-video-preview.ytpp-pinned * {
 }
 
 /* YouTube's native progress bar takes focus on click, which paints a blue
- * focus ring on the pinned preview. Suppress it. */
-ytd-video-preview.ytpp-pinned,
-ytd-video-preview.ytpp-pinned * {
+ * focus ring. Suppress mouse-induced focus rings but keep keyboard ones
+ * (:focus-visible) so the extension's own controls stay accessible. */
+ytd-video-preview.ytpp-pinned *:focus:not(:focus-visible) {
   outline: none !important;
 }
 
