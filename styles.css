@@ -44,6 +44,13 @@ ytd-video-preview.ytpp-pinned * {
   pointer-events: auto !important;
 }
 
+/* YouTube's native progress bar takes focus on click, which paints a blue
+ * focus ring on the pinned preview. Suppress it. */
+ytd-video-preview.ytpp-pinned,
+ytd-video-preview.ytpp-pinned * {
+  outline: none !important;
+}
+
 /* Belt-and-suspenders: keep the element renderable even if YouTube sets
  * hidden or display:none on blur / mouseleave. */
 body.ytpp-active ytd-video-preview {
