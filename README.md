@@ -19,7 +19,7 @@ Settings (right-click the toolbar icon → Options) has one toggle: whether to a
 ## Limitations
 
 - **It's not full resolution.** YouTube serves the hover preview as its own lower-quality clip.
-- Some preview clips don't include an audio track, so unmuting has no effect.
+- It doesn't work on shorts
 - If YouTube renames an internal class or custom element, the relevant selectors will need updating. They're collected in a `YT` object near the top of `content.js` and `page_shim.js`.
 
 ## License
