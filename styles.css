@@ -51,6 +51,12 @@ ytd-video-preview.ytpp-pinned *:focus:not(:focus-visible) {
   outline: none !important;
 }
 
+/* YouTube's drag container has its own outline that the :focus-visible rule
+ * above doesn't catch — kill it unconditionally inside a pinned preview. */
+ytd-video-preview.ytpp-pinned .ytPlayerProgressBarDragContainer {
+  outline: none !important;
+}
+
 /* Belt-and-suspenders: keep the element renderable even if YouTube sets
  * hidden or display:none on blur / mouseleave. */
 body.ytpp-active ytd-video-preview {
