@@ -325,16 +325,29 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
   transform: scale(1.25);
 }
 
-/* ---- Hide YouTube player controls and loading spinner when pinned and not hovering */
+/* ---- Hide YouTube player controls and loading spinner when pinned and not hovering
+ * visibility, not opacity: opacity is a group effect descendants can't
+ * override, so if a YouTube variant nests the media inside one of these
+ * containers, opacity:0 would take the video down with it. visibility is
+ * inherited and child-overridable — the media rule below wins. */
 ytd-video-preview.ytpp-pinned yt-inline-player-controls,
 ytd-video-preview.ytpp-pinned .ytp-spinner-container {
-  opacity: 0 !important;
+  visibility: hidden !important;
   pointer-events: none !important;
-  transition: opacity 0.15s;
 }
 
 ytd-video-preview.ytpp-pinned:has(:hover) yt-inline-player-controls,
 ytd-video-preview.ytpp-pinned.ytpp-show-controls yt-inline-player-controls {
-  opacity: 1 !important;
+  visibility: visible !important;
   pointer-events: auto !important;
+}
+
+/* Never let the media itself be hidden while pinned, whichever container or
+ * class YouTube toggles around it. visibility:visible beats any hidden
+ * ancestor; display/opacity cover direct hits on these elements. */
+body.ytpp-active ytd-video-preview ytd-player,
+body.ytpp-active ytd-video-preview video {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
 }

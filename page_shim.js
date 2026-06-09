@@ -78,11 +78,13 @@
       });
     }
 
-    // mouseleave/mouseout inside the locked preview triggers Polymer's
-    // synchronous player teardown. node.contains(node) is true for self.
-    else if (type === 'mouseleave' || type === 'mouseout') {
+    // Leave-events trigger YouTube's synchronous player teardown. Some of
+    // YouTube's experiment bundles register pointer events instead of mouse
+    // events (a physical mouse fires both), so guard all four variants.
+    else if (type === 'mouseleave' || type === 'mouseout' ||
+             type === 'pointerleave' || type === 'pointerout') {
       wrapped = _wrapperFor(handler, type, options, () => function (e) {
-        if (pinned && lockedVP?.contains(e.target)) return;
+        if (pinned && isPinnedLeaveTarget(e.target)) return;
         return handler.call(this, e);
       });
     }
@@ -186,6 +188,18 @@
 
   function getVideo() {
     return document.querySelector(YT.PREVIEW_VIDEO);
+  }
+
+  // True when a leave-type event at `t` concerns the pinned preview or the
+  // pinned card's chain — the cases where YouTube's exit handlers must not
+  // run. Exit handlers live both inside the preview and on the hovered card
+  // or its ancestors; while pinned the backdrop absorbs all real pointer
+  // traffic, so no leave event touching either is legitimate.
+  // node.contains(node) is true for self.
+  function isPinnedLeaveTarget(t) {
+    if (!t || t.nodeType !== 1) return false;
+    if (lockedVP?.contains(t)) return true;
+    return !!(t.closest?.('.ytpp-pinned-card') || t.querySelector?.('.ytpp-pinned-card'));
   }
 
   function getPlayer() {

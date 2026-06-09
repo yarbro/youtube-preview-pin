@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Preview Pin",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Click YouTube hover previews to pin and enlarge them so they keep playing without you holding the mouse over them.",
   "homepage_url": "https://github.com/yarbro/youtube-preview-pin",
   "icons": {

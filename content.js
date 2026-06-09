@@ -383,13 +383,31 @@
 
     // After a seek to the end of a VOD, 'ended' and 'seeked' may never fire
     // — the video element gets removed (or its parent replaced) first. Poll
-    // for disconnection as a fallback.
+    // for disconnection as a fallback. Mid-video disconnects either re-bind
+    // to a replacement element or, if none appears, close the pin gracefully
+    // instead of leaving an empty shell up.
+    let disconnectedFrames = 0;
     const aliveCheck = () => {
       if (!scrubVideo) { scrubAliveRafId = null; return; }
-      if (!scrubbing && !scrubVideo.isConnected && lastKnownTime >= scrubEndThreshold - 0.5) {
-        scrubAliveRafId = null;
-        unpin();
-        return;
+      if (!scrubbing && !scrubVideo.isConnected) {
+        if (lastKnownTime >= scrubEndThreshold - 0.5) {
+          scrubAliveRafId = null;
+          unpin();
+          return;
+        }
+        const replacement = document.querySelector(YT.PREVIEW_VIDEO);
+        if (replacement && replacement !== scrubVideo) {
+          // rebindVideo -> attachScrubber starts a fresh aliveCheck loop.
+          rebindVideo();
+          return;
+        }
+        if (++disconnectedFrames > 90) { // ~1.5 s with no video
+          scrubAliveRafId = null;
+          unpin();
+          return;
+        }
+      } else {
+        disconnectedFrames = 0;
       }
       scrubAliveRafId = requestAnimationFrame(aliveCheck);
     };
@@ -565,8 +583,9 @@
 
   // CSS pointer-events:none is the primary guard against hover events on
   // non-pinned cards; this is the JS belt-and-suspenders for anything that
-  // slips through.
-  for (const type of ['mouseenter', 'mouseover']) {
+  // slips through. Pointer events included — a mouse fires both, and some
+  // of YouTube's experiment bundles listen for the pointer variants.
+  for (const type of ['mouseenter', 'mouseover', 'pointerenter', 'pointerover']) {
     document.addEventListener(type, (e) => {
       if (!pinnedCard) return;
       const other = findCard(e.target);
