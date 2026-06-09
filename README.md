@@ -14,6 +14,16 @@ It's a useful filter for deciding whether a video is worth your time before comm
 
 Hover a thumbnail, wait for the preview to start, then click **📌 Pin** in the top-left of the preview. Unpin with the **📌 Unpin** button, by clicking the backdrop, or by pressing Escape.
 
+While pinned:
+
+| Key | Action |
+| --- | --- |
+| `Space` | Pause / play |
+| `←` / `→` | Seek 5 seconds |
+| `Esc` | Unpin |
+
+Hover the preview to show the controls and time scrubber (VOD videos show elapsed / total time; live streams can scrub back through the DVR window).
+
 Settings (right-click the toolbar icon → Options) has one toggle: whether to also turn off captions when pinning.
 
 ## Limitations

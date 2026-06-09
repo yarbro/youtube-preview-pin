@@ -11,11 +11,23 @@
   inset: 0;
   background: rgba(0, 0, 0, 0.75);
   z-index: 99998;
-  cursor: default;
+  /* Hints that clicking it closes the pin, like a lightbox. */
+  cursor: zoom-out;
 }
 
 body.ytpp-active #ytpp-backdrop {
   display: block;
+  animation: ytpp-fade-in 0.18s ease-out;
+}
+
+@keyframes ytpp-fade-in {
+  from { opacity: 0; }
+}
+
+/* Lock background scrolling while pinned — the page moving under the modal
+ * is disorienting, and YouTube lazy-loads more cards on scroll. */
+body.ytpp-active {
+  overflow: hidden !important;
 }
 
 /* ---- Pinned preview -------------------------------------------------------
@@ -177,10 +189,15 @@ ytd-video-preview.ytpp-pinned .ytpp-pin-btn {
 
 /* ---- Controls bar ---------------------------------------------------------
  * Positioned absolutely inside ytd-video-preview so YouTube's body transform
- * doesn't affect its containing block. Shown via :has(:hover) when pinned.
+ * doesn't affect its containing block. Revealed on hover when pinned, and
+ * briefly after pinning / keyboard input via .ytpp-show-controls (added by
+ * flashControls in content.js) so they're discoverable.
+ *
+ * visibility:hidden (not display:none) keeps the fade transition working and
+ * blocks interaction even though .ytpp-pinned * forces pointer-events:auto.
  */
 #ytpp-controls {
-  display: none;
+  display: flex;
   position: absolute;
   top: 20px;
   left: 20px;
@@ -188,6 +205,9 @@ ytd-video-preview.ytpp-pinned .ytpp-pin-btn {
   flex-direction: column;
   gap: 8px;
   align-items: stretch;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
 }
 
 .ytpp-controls-btns {
@@ -197,8 +217,10 @@ ytd-video-preview.ytpp-pinned .ytpp-pin-btn {
   align-items: center;
 }
 
-ytd-video-preview.ytpp-pinned:has(:hover) #ytpp-controls {
-  display: flex;
+ytd-video-preview.ytpp-pinned:has(:hover) #ytpp-controls,
+ytd-video-preview.ytpp-pinned.ytpp-show-controls #ytpp-controls {
+  opacity: 1;
+  visibility: visible;
 }
 
 /* Counter-scale so the controls render at natural size despite the parent transform. */
@@ -260,6 +282,8 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
 .ytpp-scrubber-label {
   color: #fff;
   font: 500 12px/1 'Roboto', Arial, sans-serif;
+  /* Fixed-width digits so the label doesn't jiggle as time ticks. */
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.2px;
   white-space: nowrap;
   opacity: 0.85;
@@ -269,8 +293,12 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
 }
 
 .ytpp-scrubber {
+  /* Zero intrinsic width: the buttons row above sets #ytpp-controls' width,
+   * and this row stretches to match it (align-items: stretch), with the
+   * scrubber flexing into whatever space the label leaves. */
   flex: 1;
-  min-width: 80px;
+  width: 0;
+  min-width: 0;
   height: 4px;
   -webkit-appearance: none;
   appearance: none;
@@ -290,6 +318,11 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
   background: #fff;
   cursor: pointer;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  transition: transform 0.1s;
+}
+
+.ytpp-scrubber:hover::-webkit-slider-thumb {
+  transform: scale(1.25);
 }
 
 /* ---- Hide YouTube player controls and loading spinner when pinned and not hovering */
@@ -300,7 +333,8 @@ ytd-video-preview.ytpp-pinned .ytp-spinner-container {
   transition: opacity 0.15s;
 }
 
-ytd-video-preview.ytpp-pinned:has(:hover) yt-inline-player-controls {
+ytd-video-preview.ytpp-pinned:has(:hover) yt-inline-player-controls,
+ytd-video-preview.ytpp-pinned.ytpp-show-controls yt-inline-player-controls {
   opacity: 1 !important;
   pointer-events: auto !important;
 }

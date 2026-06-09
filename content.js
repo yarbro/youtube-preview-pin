@@ -41,6 +41,7 @@
   let scrubEndThreshold  = Infinity; // VOD duration at pin time; Infinity for live
   let lastKnownTime      = 0;
   let scrubAliveRafId    = null;
+  let controlsFlashTimer = null;
 
   // ---- Utilities -----------------------------------------------------------
 
@@ -91,10 +92,12 @@
   const pauseBtn = document.createElement('button');
   pauseBtn.className = 'ytpp-pause-btn';
   pauseBtn.textContent = '⏸ Pause';
+  pauseBtn.title = 'Pause (Space)';
   controlsBtns.appendChild(pauseBtn);
   const unpinBtn = document.createElement('button');
   unpinBtn.className = 'ytpp-unpin-btn';
   unpinBtn.textContent = '📌 Unpin';
+  unpinBtn.title = 'Unpin (Esc)';
   controlsBtns.appendChild(unpinBtn);
   controls.appendChild(controlsBtns);
 
@@ -111,6 +114,8 @@
   scrubber.max       = '1';
   scrubber.step      = '0.001';
   scrubber.value     = '0';
+  scrubber.setAttribute('aria-label', 'Seek (← →)');
+  scrubber.title     = 'Seek (← →)';
   scrubberRow.appendChild(scrubber);
   controls.appendChild(scrubberRow);
 
@@ -141,7 +146,7 @@
   scrubber.addEventListener('input', () => {
     if (!scrubVideo) return;
     scrubVideo.currentTime = parseFloat(scrubber.value);
-    scrubberLabel.textContent = formatTime(scrubVideo.currentTime);
+    updateTimeLabel();
   });
 
   // VOD: unpin when the scrubber is released at the end. 'ended' won't fire
@@ -183,6 +188,7 @@
     const btn = document.createElement('button');
     btn.className = 'ytpp-pin-btn';
     btn.textContent = '📌 Pin';
+    btn.title = 'Pin this preview so it keeps playing';
     vp.appendChild(btn);
   }
 
@@ -283,6 +289,32 @@
 
   // ---- Scrubber ------------------------------------------------------------
 
+  // "1:23 / 10:45" for VOD, "1:23 · LIVE" for live streams.
+  function updateTimeLabel() {
+    if (!scrubVideo) { scrubberLabel.textContent = '0:00'; return; }
+    const cur = formatTime(scrubVideo.currentTime);
+    if (pinnedIsLive) {
+      scrubberLabel.textContent = `${cur} · LIVE`;
+      return;
+    }
+    const dur = isFinite(scrubVideo.duration) ? scrubVideo.duration : scrubEndThreshold;
+    scrubberLabel.textContent = isFinite(dur) ? `${cur} / ${formatTime(dur)}` : cur;
+  }
+
+  // Keyboard seek (← →). Clamps to the scrubber's range so the VOD
+  // stop-1s-short-of-the-end teardown guard applies to key seeks too.
+  function seekBy(delta) {
+    if (!scrubVideo) return;
+    const min = parseFloat(scrubber.min) || 0;
+    const max = parseFloat(scrubber.max);
+    const target = Math.max(min, Math.min(isFinite(max) ? max : Infinity,
+                                          scrubVideo.currentTime + delta));
+    scrubVideo.currentTime = target;
+    scrubber.value = String(target);
+    updateTimeLabel();
+    flashControls();
+  }
+
   function attachScrubber(isLive) {
     const video = document.querySelector(YT.PREVIEW_VIDEO);
     if (!video) return;
@@ -311,7 +343,7 @@
 
     syncRange();
     scrubber.value = String(video.currentTime);
-    scrubberLabel.textContent = formatTime(video.currentTime);
+    updateTimeLabel();
 
     // 'seeking' fires with the target before timeupdate catches up, so this
     // keeps lastKnownTime current right up to the moment of teardown.
@@ -323,7 +355,7 @@
       if (isLive) syncRange();
       if (!scrubbing) {
         scrubber.value = String(scrubVideo.currentTime);
-        scrubberLabel.textContent = formatTime(scrubVideo.currentTime);
+        updateTimeLabel();
       }
     };
 
@@ -399,7 +431,25 @@
 
   function setPauseState(paused) {
     previewPaused = paused;
-    pauseBtn.textContent = paused ? '▶ Play' : '⏸ Pause';
+    pauseBtn.textContent = paused ? '▶ Play'      : '⏸ Pause';
+    pauseBtn.title       = paused ? 'Play (Space)' : 'Pause (Space)';
+  }
+
+  function togglePause() {
+    const pausing = !previewPaused;
+    setPauseState(pausing);
+    document.dispatchEvent(new CustomEvent(pausing ? 'ytpp-pause' : 'ytpp-play'));
+  }
+
+  // Reveal the controls for a moment (on pin and on keyboard interaction) so
+  // they're discoverable without hovering; CSS fades them back out.
+  function flashControls(ms = 2500) {
+    if (!pinnedVP) return;
+    pinnedVP.classList.add('ytpp-show-controls');
+    clearTimeout(controlsFlashTimer);
+    controlsFlashTimer = setTimeout(() => {
+      pinnedVP?.classList.remove('ytpp-show-controls');
+    }, ms);
   }
 
   function pin(card, disableCaptions = true) {
@@ -430,6 +480,7 @@
     vp.classList.add('ytpp-pinned');
     startBlockingHidden(vp);
     attachScrubber(isLive);
+    flashControls();
   }
 
   function unpin() {
@@ -450,7 +501,8 @@
 
     // Use the element captured at pin time — if YouTube rebuilt the preview
     // while pinned, re-querying would leave ytpp-pinned stuck on the old one.
-    pinnedVP?.classList.remove('ytpp-pinned');
+    clearTimeout(controlsFlashTimer);
+    pinnedVP?.classList.remove('ytpp-pinned', 'ytpp-show-controls');
     pinnedVP = null;
     document.documentElement.style.removeProperty('--ytpp-scale');
   }
@@ -472,9 +524,7 @@
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-      const pausing = !previewPaused;
-      setPauseState(pausing);
-      document.dispatchEvent(new CustomEvent(pausing ? 'ytpp-pause' : 'ytpp-play'));
+      togglePause();
       return;
     }
 
@@ -524,12 +574,39 @@
     }, true);
   }
 
+  // Keyboard controls while pinned: Esc unpins, Space toggles pause,
+  // ← / → seek 5 s. Space and the arrows are left alone when a form control
+  // or editable element has focus — both to avoid stealing typing from the
+  // search box and because our own buttons/scrubber already handle those
+  // keys natively (handling them here too would double-fire).
+  function isInteractiveTarget(el) {
+    const tag = el?.tagName ?? '';
+    return el?.isContentEditable ||
+      tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON';
+  }
+
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && pinnedCard) {
+    if (!pinnedCard) return;
+
+    if (e.key === 'Escape') {
       e.preventDefault();
       unpin();
+      return;
     }
-  });
+
+    if (e.key === ' ') {
+      // Range inputs ignore Space, so it's safe (and expected) to toggle
+      // pause even while the scrubber still has focus from a recent drag.
+      if (isInteractiveTarget(e.target) && e.target !== scrubber) return;
+      e.preventDefault(); // also stops the page-scroll default
+      togglePause();
+      flashControls();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      if (isInteractiveTarget(e.target)) return;
+      e.preventDefault();
+      seekBy(e.key === 'ArrowRight' ? 5 : -5);
+    }
+  }, true);
 
   // Recompute scale on resize using the stored natural width — we never want
   // to remove ytpp-pinned, which would disturb YouTube's player state.
