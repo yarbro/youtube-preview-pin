@@ -11,6 +11,7 @@
       'ytd-compact-video-renderer',
       'ytd-rich-grid-media',
       'ytd-reel-item-renderer',
+      'yt-lockup-view-model', // current card element; the ytd-* renderers above are legacy
     ].join(','),
     SHORT_CARD: 'ytm-shorts-lockup-view-model, a[href*="/shorts/"]',
   };
@@ -25,6 +26,8 @@
   // ---- State ---------------------------------------------------------------
 
   let pinnedCard         = null;
+  let pinnedVP           = null; // the ytd-video-preview element captured at pin time
+  let pinnedIsLive       = false;
   let hiddenBlocker      = null;
   let currentPreviewCard = null;
   let pinnedNaturalW     = 0;
@@ -53,8 +56,25 @@
   }
 
   function formatTime(seconds) {
+    if (!isFinite(seconds) || seconds < 0) return '0:00';
     const t = Math.floor(seconds);
-    return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const s = String(t % 60).padStart(2, '0');
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+  }
+
+  // chrome.storage.sync.get throws synchronously once the extension context
+  // is invalidated (extension reloaded/updated while this tab stays open).
+  // Fall back to DEFAULTS in every failure mode so the pin still works.
+  function getSettings(cb) {
+    try {
+      chrome.storage.sync.get(DEFAULTS, (settings) => {
+        cb(chrome.runtime.lastError ? DEFAULTS : settings);
+      });
+    } catch (_) {
+      cb(DEFAULTS);
+    }
   }
 
   // ---- DOM setup -----------------------------------------------------------
@@ -176,18 +196,22 @@
   ensureControls();
 
   // YouTube reconstructs the preview outside of a full navigation (lazy DOM
-  // updates), so re-inject buttons whenever a new preview appears.
-  const PREVIEW_TAG = YT.PREVIEW.toUpperCase();
-  new MutationObserver((mutations) => {
-    for (const { addedNodes } of mutations) {
-      for (const node of addedNodes) {
-        if (node.nodeType === 1 && node.tagName === PREVIEW_TAG) {
-          ensurePinButton();
-          ensureControls();
-        }
-      }
-    }
-  }).observe(document.body, { childList: true, subtree: true });
+  // updates), so re-inject buttons whenever the DOM changes. Debounced to one
+  // check per frame; ensure* early-return cheaply when nothing is missing.
+  // This also catches a preview inserted as a descendant of an added node,
+  // which per-addedNode tag matching would miss.
+  let ensureScheduled = false;
+  function scheduleEnsure() {
+    if (ensureScheduled) return;
+    ensureScheduled = true;
+    requestAnimationFrame(() => {
+      ensureScheduled = false;
+      ensurePinButton();
+      ensureControls();
+    });
+  }
+  new MutationObserver(scheduleEnsure)
+    .observe(document.body, { childList: true, subtree: true });
 
   // ---- Hidden-element guard ------------------------------------------------
   // Reverts hidden / display:none / visibility:hidden / opacity:0 applied
@@ -219,6 +243,17 @@
               lastKnownTime >= scrubEndThreshold - 0.5) {
             unpin();
             return;
+          }
+          // YouTube sometimes swaps the <video> element in place (source
+          // reload, quality switch). Once the old element is detached and a
+          // replacement exists, re-bind the scrubber and the page_shim
+          // guards so they don't keep tracking the dead one.
+          if (pinnedCard && scrubVideo && !scrubbing && !scrubVideo.isConnected) {
+            const video = document.querySelector(YT.PREVIEW_VIDEO);
+            if (video && video !== scrubVideo) {
+              rebindVideo();
+              return;
+            }
           }
           continue;
         }
@@ -329,6 +364,14 @@
     scrubAliveRafId = requestAnimationFrame(aliveCheck);
   }
 
+  // Re-attach scrubber listeners after YouTube replaces the <video> element,
+  // and tell page_shim.js to move its pause/mute guards to the new one.
+  function rebindVideo() {
+    detachScrubber();
+    attachScrubber(pinnedIsLive);
+    document.dispatchEvent(new CustomEvent('ytpp-video-changed'));
+  }
+
   function detachScrubber() {
     if (scrubAliveRafId !== null) cancelAnimationFrame(scrubAliveRafId);
     if (scrubVideo) {
@@ -367,11 +410,13 @@
     if (!vp) return;
 
     pinnedCard = card;
+    pinnedVP   = vp;
     card.classList.add('ytpp-pinned-card');
 
     // YouTube reports a finite duration even for live previews, so detect
     // live from the LIVE badge on the card instead.
     const isLive = !!card.querySelector('.ytBadgeShapeThumbnailLive');
+    pinnedIsLive = isLive;
 
     // Arm page_shim.js synchronously before the element moves.
     document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions, isLive } }));
@@ -397,13 +442,16 @@
     pinnedCard.classList.remove('ytpp-pinned-card');
     document.body.classList.remove('ytpp-active');
     pinnedCard     = null;
+    pinnedIsLive   = false;
     pinnedNaturalW = 0;
     setPauseState(false);
     detachScrubber();
     stopBlockingHidden();
 
-    const vp = getPreviewEl();
-    if (vp) vp.classList.remove('ytpp-pinned');
+    // Use the element captured at pin time — if YouTube rebuilt the preview
+    // while pinned, re-querying would leave ytpp-pinned stuck on the old one.
+    pinnedVP?.classList.remove('ytpp-pinned');
+    pinnedVP = null;
     document.documentElement.style.removeProperty('--ytpp-scale');
   }
 
@@ -438,8 +486,7 @@
         unpin();
       } else if (currentPreviewCard && isPreviewVisible()) {
         const card = currentPreviewCard;
-        chrome.storage.sync.get(DEFAULTS, (settings) => {
-          if (chrome.runtime.lastError) return;
+        getSettings((settings) => {
           if (card === currentPreviewCard && document.contains(card) && isPreviewVisible()) {
             pin(card, settings.disableCaptionsOnPin);
           }

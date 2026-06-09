@@ -74,7 +74,8 @@ body.ytpp-active ytd-video-preview {
 .ytpp-active ytd-grid-video-renderer:not(.ytpp-pinned-card),
 .ytpp-active ytd-compact-video-renderer:not(.ytpp-pinned-card),
 .ytpp-active ytd-rich-grid-media:not(.ytpp-pinned-card),
-.ytpp-active ytd-reel-item-renderer:not(.ytpp-pinned-card) {
+.ytpp-active ytd-reel-item-renderer:not(.ytpp-pinned-card),
+.ytpp-active yt-lockup-view-model:not(.ytpp-pinned-card) {
   pointer-events: none !important;
 }
 

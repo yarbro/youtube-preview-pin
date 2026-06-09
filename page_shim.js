@@ -39,41 +39,74 @@
   }
 
   const _origAEL = EventTarget.prototype.addEventListener;
+  const _origREL = EventTarget.prototype.removeEventListener;
+
+  // removeEventListener only works when given the exact function that was
+  // registered, and the browser dedupes repeat addEventListener calls by
+  // identity — so cache one wrapper per (handler, type, capture) and reuse
+  // it. Without this, YouTube's removals silently fail (leaked listeners)
+  // and re-adds register duplicate wrappers.
+  const _wrappers = new WeakMap(); // handler -> Map<'type:capture', wrapper>
+
+  function _captureOf(options) {
+    return options === true || (typeof options === 'object' && !!options?.capture);
+  }
+
+  function _wrapperFor(handler, type, options, make) {
+    const key = `${type}:${_captureOf(options) ? 1 : 0}`;
+    let byKey = _wrappers.get(handler);
+    if (!byKey) { byKey = new Map(); _wrappers.set(handler, byKey); }
+    let wrapped = byKey.get(key);
+    if (!wrapped) { wrapped = make(); byKey.set(key, wrapped); }
+    return wrapped;
+  }
+
   EventTarget.prototype.addEventListener = function (type, handler, options) {
     if (typeof handler !== 'function') {
       return _origAEL.call(this, type, handler, options);
     }
-    const self = this;
+
+    let wrapped = null;
 
     // window blur/resize: YouTube uses these to tear the player down. Our own
     // resize listener is in the isolated world and uses a different prototype.
+    // Listeners are invoked with `this` = the target they were added to.
     if (type === 'blur' || type === 'resize') {
-      return _origAEL.call(this, type, function (e) {
-        if (pinned && self === window) return;
+      wrapped = _wrapperFor(handler, type, options, () => function (e) {
+        if (pinned && this === window) return;
         return handler.call(this, e);
-      }, options);
+      });
     }
 
     // mouseleave/mouseout inside the locked preview triggers Polymer's
     // synchronous player teardown. node.contains(node) is true for self.
-    if (type === 'mouseleave' || type === 'mouseout') {
-      return _origAEL.call(this, type, function (e) {
+    else if (type === 'mouseleave' || type === 'mouseout') {
+      wrapped = _wrapperFor(handler, type, options, () => function (e) {
         if (pinned && lockedVP?.contains(e.target)) return;
         return handler.call(this, e);
-      }, options);
+      });
     }
 
     // LIVE only: blocking 'waiting' stops YouTube from snapping back to the
     // last buffered position on every unbuffered DVR scrub. VOD videos need
     // 'waiting' so MediaSource.endOfStream() can run and fire 'ended'.
-    if (type === 'waiting') {
-      return _origAEL.call(this, type, function (e) {
+    else if (type === 'waiting') {
+      wrapped = _wrapperFor(handler, type, options, () => function (e) {
         if (pinned && pinnedIsLive && lockedVP?.contains(e.target)) return;
         return handler.call(this, e);
-      }, options);
+      });
     }
 
-    return _origAEL.call(this, type, handler, options);
+    return _origAEL.call(this, type, wrapped ?? handler, options);
+  };
+
+  EventTarget.prototype.removeEventListener = function (type, handler, options) {
+    if (typeof handler === 'function') {
+      const key = `${type}:${_captureOf(options) ? 1 : 0}`;
+      const wrapped = _wrappers.get(handler)?.get(key);
+      if (wrapped) return _origREL.call(this, type, wrapped, options);
+    }
+    return _origREL.call(this, type, handler, options);
   };
 
   // ---- Attribute / WebIDL guards -------------------------------------------
@@ -349,6 +382,20 @@
     try {
       const video = getVideo();
       if (video) { patchPause(video); attachPauseGuard(video); }
+    } catch (_) {}
+  });
+
+  // content.js detected that YouTube replaced the <video> element while
+  // pinned — move the pause/mute guards onto the new one and re-unmute it.
+  document.addEventListener('ytpp-video-changed', () => {
+    if (!pinned) return;
+    try {
+      const video = getVideo();
+      if (!video || video === guardedVideo) return;
+      unpatchPause(guardedVideo);
+      patchPause(video);
+      attachPauseGuard(video); // detaches the old guard internally
+      unmute();
     } catch (_) {}
   });
 
