@@ -78,17 +78,6 @@
       });
     }
 
-    // Leave-events trigger YouTube's synchronous player teardown. Some of
-    // YouTube's experiment bundles register pointer events instead of mouse
-    // events (a physical mouse fires both), so guard all four variants.
-    else if (type === 'mouseleave' || type === 'mouseout' ||
-             type === 'pointerleave' || type === 'pointerout') {
-      wrapped = _wrapperFor(handler, type, options, () => function (e) {
-        if (pinned && isPinnedLeaveTarget(e.target)) return;
-        return handler.call(this, e);
-      });
-    }
-
     // LIVE only: blocking 'waiting' stops YouTube from snapping back to the
     // last buffered position on every unbuffered DVR scrub. VOD videos need
     // 'waiting' so MediaSource.endOfStream() can run and fire 'ended'.
@@ -110,6 +99,21 @@
     }
     return _origREL.call(this, type, handler, options);
   };
+
+  // ---- Leave-event block ---------------------------------------------------
+  // Leave-events trigger YouTube's synchronous player teardown. Wrapping
+  // only catches plain-function listeners added through addEventListener;
+  // stopping the events in the window capture phase covers every listener,
+  // capture or bubble, on any target, however it was registered. Registered
+  // here at document_start so it's first in line. Some of YouTube's experiment
+  // bundles use pointer events instead of mouse events (a physical mouse
+  // fires both), so block all four variants.
+
+  for (const type of ['mouseleave', 'mouseout', 'pointerleave', 'pointerout']) {
+    _origAEL.call(window, type, (e) => {
+      if (pinned && isPinnedLeaveTarget(e.target)) e.stopImmediatePropagation();
+    }, true);
+  }
 
   // ---- Attribute / WebIDL guards -------------------------------------------
 
@@ -199,7 +203,7 @@
   function isPinnedLeaveTarget(t) {
     if (!t || t.nodeType !== 1) return false;
     if (lockedVP?.contains(t)) return true;
-    return !!(t.closest?.('.ytpp-pinned-card') || t.querySelector?.('.ytpp-pinned-card'));
+    return !!(t.closest?.('[ytpp-pinned-card]') || t.querySelector?.('[ytpp-pinned-card]'));
   }
 
   function getPlayer() {

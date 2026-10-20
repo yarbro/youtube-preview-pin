@@ -14,6 +14,10 @@
       'yt-lockup-view-model', // current card element; the ytd-* renderers above are legacy
     ].join(','),
     SHORT_CARD: 'ytm-shorts-lockup-view-model, a[href*="/shorts/"]',
+    // Current previews stay in the DOM and toggle these classes instead of
+    // the legacy `hidden` attribute.
+    PREVIEW_HOST:   'ytdVideoPreviewHost',
+    PREVIEW_ACTIVE: 'ytdVideoPreviewActive',
   };
 
   // Must match options.js.
@@ -46,7 +50,11 @@
   // ---- Utilities -----------------------------------------------------------
 
   const getPreviewEl     = () => document.querySelector(YT.PREVIEW);
-  const isPreviewVisible = () => { const vp = getPreviewEl(); return vp && !vp.hasAttribute('hidden'); };
+  const isPreviewVisible = () => {
+    const vp = getPreviewEl();
+    if (!vp || vp.hasAttribute('hidden')) return false;
+    return !vp.classList.contains(YT.PREVIEW_HOST) || vp.classList.contains(YT.PREVIEW_ACTIVE);
+  };
   const findCard         = (el) => el?.closest?.(YT.CARDS) ?? null;
   const isShortCard      = (card) => !!card.querySelector(YT.SHORT_CARD);
 
@@ -463,10 +471,10 @@
   // they're discoverable without hovering; CSS fades them back out.
   function flashControls(ms = 2500) {
     if (!pinnedVP) return;
-    pinnedVP.classList.add('ytpp-show-controls');
+    pinnedVP.setAttribute('ytpp-show-controls', '');
     clearTimeout(controlsFlashTimer);
     controlsFlashTimer = setTimeout(() => {
-      pinnedVP?.classList.remove('ytpp-show-controls');
+      pinnedVP?.removeAttribute('ytpp-show-controls');
     }, ms);
   }
 
@@ -479,7 +487,7 @@
 
     pinnedCard = card;
     pinnedVP   = vp;
-    card.classList.add('ytpp-pinned-card');
+    card.setAttribute('ytpp-pinned-card', '');
 
     // YouTube reports a finite duration even for live previews, so detect
     // live from the LIVE badge on the card instead.
@@ -495,7 +503,7 @@
     document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW));
 
     document.body.classList.add('ytpp-active');
-    vp.classList.add('ytpp-pinned');
+    vp.setAttribute('ytpp-pinned', '');
     startBlockingHidden(vp);
     attachScrubber(isLive);
     flashControls();
@@ -508,7 +516,7 @@
     // by the element snapping back doesn't hit stale guard state.
     document.dispatchEvent(new CustomEvent('ytpp-unpin'));
 
-    pinnedCard.classList.remove('ytpp-pinned-card');
+    pinnedCard.removeAttribute('ytpp-pinned-card');
     document.body.classList.remove('ytpp-active');
     pinnedCard     = null;
     pinnedIsLive   = false;
@@ -520,7 +528,8 @@
     // Use the element captured at pin time — if YouTube rebuilt the preview
     // while pinned, re-querying would leave ytpp-pinned stuck on the old one.
     clearTimeout(controlsFlashTimer);
-    pinnedVP?.classList.remove('ytpp-pinned', 'ytpp-show-controls');
+    pinnedVP?.removeAttribute('ytpp-pinned');
+    pinnedVP?.removeAttribute('ytpp-show-controls');
     pinnedVP = null;
     document.documentElement.style.removeProperty('--ytpp-scale');
   }

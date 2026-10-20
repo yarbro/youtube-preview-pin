@@ -38,7 +38,7 @@ body.ytpp-active {
  * handler from firing when the cursor is on the backdrop; children get
  * pointer-events:auto so controls and the pin button stay interactive.
  */
-ytd-video-preview.ytpp-pinned {
+ytd-video-preview[ytpp-pinned] {
   position: fixed !important;
   top: 50% !important;
   left: 50% !important;
@@ -52,20 +52,20 @@ ytd-video-preview.ytpp-pinned {
   pointer-events: none !important;
 }
 
-ytd-video-preview.ytpp-pinned * {
+ytd-video-preview[ytpp-pinned] * {
   pointer-events: auto !important;
 }
 
 /* YouTube's native progress bar takes focus on click, which paints a blue
  * focus ring. Suppress mouse-induced focus rings but keep keyboard ones
  * (:focus-visible) so the extension's own controls stay accessible. */
-ytd-video-preview.ytpp-pinned *:focus:not(:focus-visible) {
+ytd-video-preview[ytpp-pinned] *:focus:not(:focus-visible) {
   outline: none !important;
 }
 
 /* YouTube's drag container has its own outline that the :focus-visible rule
  * above doesn't catch — kill it unconditionally inside a pinned preview. */
-ytd-video-preview.ytpp-pinned .ytPlayerProgressBarDragContainer {
+ytd-video-preview[ytpp-pinned] .ytPlayerProgressBarDragContainer {
   outline: none !important;
 }
 
@@ -77,17 +77,32 @@ body.ytpp-active ytd-video-preview {
   opacity: 1 !important;
 }
 
+/* Current previews fade the player layer out by dropping the
+ * ytdVideoPreviewPlaying class, which YouTube rewrites along with the rest of
+ * the class attribute on hover-out — so it can't be guarded, only overridden.
+ * (This is also why the pin state lives in attributes, not classes.) */
+body.ytpp-active ytd-video-preview .ytdVideoPreviewPlayerContainerWrapper {
+  opacity: 1 !important;
+}
+
+/* Current previews also sit inside a loader container that YouTube hides
+ * with display:none (ytdVideoPreviewLoaderHidden) when it dismisses the
+ * preview, which would take the pinned preview down with it. */
+body.ytpp-active .ytdVideoPreviewLoaderVideoPreviewContainer:has(> ytd-video-preview[ytpp-pinned]) {
+  display: block !important;
+}
+
 /* ---- Freeze non-pinned cards ----------------------------------------------
  * Prevents YouTube from detecting hover on other cards while pinned.
  * JS listeners in content.js provide a secondary guard for events that
  * slip through. */
-.ytpp-active ytd-rich-item-renderer:not(.ytpp-pinned-card),
-.ytpp-active ytd-video-renderer:not(.ytpp-pinned-card),
-.ytpp-active ytd-grid-video-renderer:not(.ytpp-pinned-card),
-.ytpp-active ytd-compact-video-renderer:not(.ytpp-pinned-card),
-.ytpp-active ytd-rich-grid-media:not(.ytpp-pinned-card),
-.ytpp-active ytd-reel-item-renderer:not(.ytpp-pinned-card),
-.ytpp-active yt-lockup-view-model:not(.ytpp-pinned-card) {
+.ytpp-active ytd-rich-item-renderer:not([ytpp-pinned-card]),
+.ytpp-active ytd-video-renderer:not([ytpp-pinned-card]),
+.ytpp-active ytd-grid-video-renderer:not([ytpp-pinned-card]),
+.ytpp-active ytd-compact-video-renderer:not([ytpp-pinned-card]),
+.ytpp-active ytd-rich-grid-media:not([ytpp-pinned-card]),
+.ytpp-active ytd-reel-item-renderer:not([ytpp-pinned-card]),
+.ytpp-active yt-lockup-view-model:not([ytpp-pinned-card]) {
   pointer-events: none !important;
 }
 
@@ -183,18 +198,18 @@ ytd-video-preview:not([hidden]):hover .ytpp-pin-btn:hover {
   background: rgba(50, 50, 50, 0.92);
 }
 
-ytd-video-preview.ytpp-pinned .ytpp-pin-btn {
+ytd-video-preview[ytpp-pinned] .ytpp-pin-btn {
   display: none;
 }
 
 /* ---- Controls bar ---------------------------------------------------------
  * Positioned absolutely inside ytd-video-preview so YouTube's body transform
  * doesn't affect its containing block. Revealed on hover when pinned, and
- * briefly after pinning / keyboard input via .ytpp-show-controls (added by
+ * briefly after pinning / keyboard input via [ytpp-show-controls] (added by
  * flashControls in content.js) so they're discoverable.
  *
  * visibility:hidden (not display:none) keeps the fade transition working and
- * blocks interaction even though .ytpp-pinned * forces pointer-events:auto.
+ * blocks interaction even though [ytpp-pinned] * forces pointer-events:auto.
  */
 #ytpp-controls {
   display: flex;
@@ -217,14 +232,14 @@ ytd-video-preview.ytpp-pinned .ytpp-pin-btn {
   align-items: center;
 }
 
-ytd-video-preview.ytpp-pinned:has(:hover) #ytpp-controls,
-ytd-video-preview.ytpp-pinned.ytpp-show-controls #ytpp-controls {
+ytd-video-preview[ytpp-pinned]:has(:hover) #ytpp-controls,
+ytd-video-preview[ytpp-pinned][ytpp-show-controls] #ytpp-controls {
   opacity: 1;
   visibility: visible;
 }
 
 /* Counter-scale so the controls render at natural size despite the parent transform. */
-ytd-video-preview.ytpp-pinned #ytpp-controls {
+ytd-video-preview[ytpp-pinned] #ytpp-controls {
   transform: scale(calc(1 / var(--ytpp-scale, 1.5)));
   transform-origin: top left;
 }
@@ -330,14 +345,14 @@ ytd-video-preview.ytpp-pinned #ytpp-controls {
  * override, so if a YouTube variant nests the media inside one of these
  * containers, opacity:0 would take the video down with it. visibility is
  * inherited and child-overridable — the media rule below wins. */
-ytd-video-preview.ytpp-pinned yt-inline-player-controls,
-ytd-video-preview.ytpp-pinned .ytp-spinner-container {
+ytd-video-preview[ytpp-pinned] yt-inline-player-controls,
+ytd-video-preview[ytpp-pinned] .ytp-spinner-container {
   visibility: hidden !important;
   pointer-events: none !important;
 }
 
-ytd-video-preview.ytpp-pinned:has(:hover) yt-inline-player-controls,
-ytd-video-preview.ytpp-pinned.ytpp-show-controls yt-inline-player-controls {
+ytd-video-preview[ytpp-pinned]:has(:hover) yt-inline-player-controls,
+ytd-video-preview[ytpp-pinned][ytpp-show-controls] yt-inline-player-controls {
   visibility: visible !important;
   pointer-events: auto !important;
 }
