@@ -14,6 +14,8 @@ It's a useful filter for deciding whether a video is worth your time before comm
 
 Hover a thumbnail, wait for the preview to start, then click **📌 Pin** in the top-left of the preview. Unpin with the **📌 Unpin** button, by clicking the backdrop, or by pressing Escape.
 
+Hover previews also work on channel pages, where YouTube doesn't normally show them.
+
 While pinned:
 
 | Key | Action |
