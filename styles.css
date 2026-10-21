@@ -486,9 +486,16 @@ ytd-video-preview[ytpp-pinned][ytpp-show-controls] yt-inline-player-controls {
   pointer-events: auto !important;
 }
 
+/* Mute and CC (top right) would otherwise scale up with the preview.
+ * Counter-scale them from their corner so they keep their unpinned size,
+ * like the playback bar. */
+ytd-video-preview[ytpp-pinned] .ytInlinePlayerControlsTopRightControls {
+  transform: scale(calc(1 / var(--ytpp-scale, 1.5)));
+  transform-origin: top right;
+}
+
 /* The playback bar replaces YouTube's bottom progress bar and remaining-time
- * badge, which would otherwise sit underneath it. Mute and CC (top right)
- * stay. */
+ * badge, which would otherwise sit underneath it. */
 ytd-video-preview[ytpp-pinned] yt-progress-bar,
 ytd-video-preview[ytpp-pinned] .ytInlinePlayerControlsBottomRightControls {
   display: none !important;
