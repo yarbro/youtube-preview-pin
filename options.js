@@ -1,14 +1,7 @@
-// Defaults must match content.js DEFAULTS.
-const DEFAULTS = { disableCaptionsOnPin: true };
-
+// YTPP_DEFAULTS and ytppGetSettings come from settings.js.
 const toggle = document.getElementById('disableCaptions');
 
-chrome.storage.sync.get(DEFAULTS, (settings) => {
-  if (chrome.runtime.lastError) {
-    console.warn('[ytpp] storage read failed:', chrome.runtime.lastError);
-    toggle.checked = DEFAULTS.disableCaptionsOnPin;
-    return;
-  }
+ytppGetSettings((settings) => {
   toggle.checked = settings.disableCaptionsOnPin;
 });
 

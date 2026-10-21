@@ -20,9 +20,6 @@
     PREVIEW_ACTIVE: 'ytdVideoPreviewActive',
   };
 
-  // Must match options.js.
-  const DEFAULTS = { disableCaptionsOnPin: true };
-
   // page_shim.js runs in world:"MAIN" at document_start. We communicate via
   // synchronous CustomEvents — dispatchEvent runs all handlers inline so
   // page_shim.js state is set before the CSS change that moves the preview.
@@ -35,6 +32,7 @@
   let hiddenBlocker      = null;
   let currentPreviewCard = null;
   let pinnedNaturalW     = 0;
+  let pinnedNaturalH     = 0;
   let previewPaused      = false;
   let scrubVideo         = null;
   let timeupdateFn       = null;
@@ -58,10 +56,13 @@
   const findCard         = (el) => el?.closest?.(YT.CARDS) ?? null;
   const isShortCard      = (card) => !!card.querySelector(YT.SHORT_CARD);
 
-  // naturalW is offsetWidth before ytpp-pinned applies position:fixed.
-  function computePinScale(naturalW) {
+  // naturalW/H are the offset size before ytpp-pinned applies position:fixed.
+  // Fit both dimensions so a short, wide window doesn't push the preview's
+  // top and bottom off screen.
+  function computePinScale(naturalW, naturalH) {
     const targetW = Math.min(window.innerWidth * 0.80, 1200);
-    return Math.max(1.1, targetW / naturalW);
+    const targetH = window.innerHeight * 0.85;
+    return Math.max(1.1, Math.min(targetW / naturalW, targetH / naturalH));
   }
 
   function formatTime(seconds) {
@@ -71,19 +72,6 @@
     const m = Math.floor((t % 3600) / 60);
     const s = String(t % 60).padStart(2, '0');
     return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
-  }
-
-  // chrome.storage.sync.get throws synchronously once the extension context
-  // is invalidated (extension reloaded/updated while this tab stays open).
-  // Fall back to DEFAULTS in every failure mode so the pin still works.
-  function getSettings(cb) {
-    try {
-      chrome.storage.sync.get(DEFAULTS, (settings) => {
-        cb(chrome.runtime.lastError ? DEFAULTS : settings);
-      });
-    } catch (_) {
-      cb(DEFAULTS);
-    }
   }
 
   // ---- DOM setup -----------------------------------------------------------
@@ -498,9 +486,10 @@
     document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions, isLive } }));
 
     // Measure before ytpp-pinned applies position:fixed (which would change
-    // the width).
-    pinnedNaturalW = vp.offsetWidth || Math.round(window.innerWidth * 0.25);
-    document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW));
+    // the size).
+    pinnedNaturalW = vp.offsetWidth  || Math.round(window.innerWidth * 0.25);
+    pinnedNaturalH = vp.offsetHeight || Math.round(pinnedNaturalW * 9 / 16);
+    document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW, pinnedNaturalH));
 
     document.body.classList.add('ytpp-active');
     vp.setAttribute('ytpp-pinned', '');
@@ -521,6 +510,7 @@
     pinnedCard     = null;
     pinnedIsLive   = false;
     pinnedNaturalW = 0;
+    pinnedNaturalH = 0;
     setPauseState(false);
     detachScrubber();
     stopBlockingHidden();
@@ -563,7 +553,7 @@
         unpin();
       } else if (currentPreviewCard && isPreviewVisible()) {
         const card = currentPreviewCard;
-        getSettings((settings) => {
+        ytppGetSettings((settings) => {
           if (card === currentPreviewCard && document.contains(card) && isPreviewVisible()) {
             pin(card, settings.disableCaptionsOnPin);
           }
@@ -636,11 +626,11 @@
     }
   }, true);
 
-  // Recompute scale on resize using the stored natural width — we never want
+  // Recompute scale on resize using the stored natural size — we never want
   // to remove ytpp-pinned, which would disturb YouTube's player state.
   window.addEventListener('resize', () => {
     if (!pinnedCard || !pinnedNaturalW) return;
-    document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW));
+    document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW, pinnedNaturalH));
   }, { passive: true });
 
   // Fired by page_shim.js when a VOD seek lands at the end — 'ended' doesn't
