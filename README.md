@@ -14,8 +14,6 @@ It's a useful filter for deciding whether a video is worth your time before comm
 
 Hover a thumbnail, wait for the preview to start, then click **📌 Pin** in the top-left of the preview. Unpin with the **📌 Unpin** button, by clicking the backdrop, or by pressing Escape.
 
-Hover previews also work on channel pages, where YouTube doesn't normally show them.
-
 While pinned:
 
 | Key | Action |
@@ -32,7 +30,6 @@ Settings (right-click the toolbar icon → Options) has one toggle: whether to a
 
 - **It's not full resolution.** YouTube serves the hover preview as its own lower-quality clip.
 - It doesn't work on Shorts, or on the mobile site (`m.youtube.com`), which has no hover previews.
-- Members-only videos only preview if you're a member of that channel.
 - If YouTube renames an internal class or custom element, the relevant selectors will need updating. They're collected in a `YT` object near the top of `content.js` and `page_shim.js`, plus the `ytdVideoPreview*` overrides in `styles.css`.
 
 ## License

@@ -11,8 +11,6 @@
     PLAYER:            'ytd-player',
     CC_BUTTON:         'ytd-video-preview .ytmClosedCaptioningButtonButton',
     CC_BUTTON_PRESSED: 'ytd-video-preview button[aria-pressed]',
-    CHANNEL_PATH:      /^\/(@|channel\/|c\/|user\/)/,
-    BROWSE_API:        '/youtubei/v1/browse',
   };
 
   let pinned           = false;
@@ -28,71 +26,6 @@
   let userInteractedAt    = 0; // performance.now() of the last user input inside the preview
   let captionObserver     = null;
   let userToggledCaptions = false; // sticky: once the user touches CC, stop auto-disabling
-
-  // ---- Channel-page previews -----------------------------------------------
-  // Channel pages leave itemPlayback out of their video lockups, which is the
-  // only thing stopping YouTube's own hover preview from running there. Add
-  // it to the page data before the lockups render: ytInitialData for full
-  // page loads, browse responses for SPA navigation and infinite scroll.
-
-  function inlinePlayback(videoId) {
-    return { inlinePlayerData: { onVisible: { innertubeCommand: {
-      commandMetadata: { webCommandMetadata: {
-        url: `/watch?v=${videoId}`, webPageType: 'WEB_PAGE_TYPE_WATCH', rootVe: 3832,
-      } },
-      watchEndpoint: { videoId, playerExtraUrlParams: [{ key: 'inline', value: '1' }] },
-    } } } };
-  }
-
-  function addInlinePlayback(node) {
-    if (Array.isArray(node)) { node.forEach(addInlinePlayback); return; }
-    if (!node || typeof node !== 'object') return;
-    const lockup = node.lockupViewModel;
-    if (lockup?.contentType === 'LOCKUP_CONTENT_TYPE_VIDEO' && lockup.contentId && !lockup.itemPlayback) {
-      lockup.itemPlayback = inlinePlayback(lockup.contentId);
-    }
-    for (const key in node) addInlinePlayback(node[key]);
-  }
-
-  // Channel responses carry channel metadata; continuations (infinite
-  // scroll) don't, but only load on the page they belong to.
-  function isChannelData(data) {
-    return !!data?.metadata?.channelMetadataRenderer ||
-      (!!data?.onResponseReceivedActions && YT.CHANNEL_PATH.test(location.pathname));
-  }
-
-  function patchChannelData(data) {
-    try { if (isChannelData(data)) addInlinePlayback(data); } catch (_) {}
-    return data;
-  }
-
-  // YouTube's inline `var ytInitialData = {...}` assigns through this setter
-  // because the property already exists on window.
-  let _initialData;
-  Object.defineProperty(window, 'ytInitialData', {
-    configurable: true,
-    get: () => _initialData,
-    set: (v) => { _initialData = patchChannelData(v); },
-  });
-
-  const _origFetch = window.fetch;
-  window.fetch = async function (input, init) {
-    const res = await _origFetch.apply(this, arguments);
-    const url = typeof input === 'string' ? input : input?.url;
-    if (!res.ok || !url?.includes(YT.BROWSE_API)) return res;
-    try {
-      const data = await res.clone().json();
-      if (!isChannelData(data)) return res;
-      addInlinePlayback(data);
-      const patched = new Response(JSON.stringify(data), {
-        status: res.status, statusText: res.statusText, headers: res.headers,
-      });
-      Object.defineProperty(patched, 'url', { value: res.url });
-      return patched;
-    } catch (_) {
-      return res;
-    }
-  };
 
   // ---- EventTarget / ResizeObserver wrap -----------------------------------
 
