@@ -12,7 +12,7 @@ It's a useful filter for deciding whether a video is worth your time before comm
 
 ## Use
 
-Hover a thumbnail, wait for the preview to start, then click **📌 Pin** in the top-left of the preview. Unpin with the **📌 Unpin** button, by clicking the backdrop, or by pressing Escape.
+Hover a thumbnail, wait for the preview to start, then click **Pin** in the top-left of the preview. Unpin with the **✕** button in the top-right corner, by clicking the backdrop, or by pressing Escape.
 
 While pinned:
 
@@ -22,7 +22,7 @@ While pinned:
 | `←` / `→` | Seek 5 seconds |
 | `Esc` | Unpin |
 
-Hover the preview to show the controls and time scrubber (VOD videos show elapsed / total time; live streams can scrub back through the DVR window).
+Hover the preview to show the playback bar along its bottom edge: play / pause, the time, and a scrubber (VOD videos show elapsed / total time; live streams can scrub back through the DVR window).
 
 Settings (right-click the toolbar icon → Options) has one toggle: whether to also turn off captions when pinning.
 

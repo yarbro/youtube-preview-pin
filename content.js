@@ -76,33 +76,65 @@
 
   // ---- DOM setup -----------------------------------------------------------
 
-  const backdrop = document.createElement('div');
+  // Material Symbols paths (24×24 viewBox). SVG instead of emoji so the
+  // icons render the same on every OS.
+  const ICONS = {
+    pin:   'M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z',
+    play:  'M8 5.14v13.72c0 .79.87 1.27 1.54.84l10.78-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14z',
+    pause: 'M7 5h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm7 0h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z',
+    close: 'M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7A1 1 0 0 0 5.7 7.11L10.59 12 5.7 16.89a1 1 0 1 0 1.41 1.41L12 13.41l4.89 4.89a1 1 0 0 0 1.41-1.41L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4z',
+  };
+
+  function icon(name) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.classList.add('ytpp-icon');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', ICONS[name]);
+    svg.appendChild(path);
+    return svg;
+  }
+
+  function createEl(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text) node.textContent = text;
+    return node;
+  }
+
+  // Backdrop, close button and shortcut hints live on <body>; only the
+  // playback bar goes inside the pinned preview.
+  const backdrop = createEl('div');
   backdrop.id = 'ytpp-backdrop';
   document.body.appendChild(backdrop);
 
-  const controls = document.createElement('div');
+  const unpinBtn = createEl('button', 'ytpp-unpin-btn');
+  unpinBtn.appendChild(icon('close'));
+  unpinBtn.title = 'Unpin (Esc)';
+  unpinBtn.setAttribute('aria-label', 'Unpin');
+  document.body.appendChild(unpinBtn);
+
+  const hints = createEl('div', 'ytpp-hints');
+  for (const [keys, action] of [[['Space'], 'Pause'], [['←', '→'], 'Seek'], [['Esc'], 'Close']]) {
+    const hint = createEl('span', 'ytpp-hint');
+    for (const key of keys) hint.appendChild(createEl('kbd', '', key));
+    hint.appendChild(document.createTextNode(action));
+    hints.appendChild(hint);
+  }
+  document.body.appendChild(hints);
+
+  const controls = createEl('div');
   controls.id = 'ytpp-controls';
 
-  const controlsBtns = document.createElement('div');
-  controlsBtns.className = 'ytpp-controls-btns';
-  const pauseBtn = document.createElement('button');
-  pauseBtn.className = 'ytpp-pause-btn';
-  pauseBtn.textContent = '⏸ Pause';
-  pauseBtn.title = 'Pause (Space)';
-  controlsBtns.appendChild(pauseBtn);
-  const unpinBtn = document.createElement('button');
-  unpinBtn.className = 'ytpp-unpin-btn';
-  unpinBtn.textContent = '📌 Unpin';
-  unpinBtn.title = 'Unpin (Esc)';
-  controlsBtns.appendChild(unpinBtn);
-  controls.appendChild(controlsBtns);
+  const pauseBtn = createEl('button', 'ytpp-pause-btn');
+  setPauseState(false);
+  controls.appendChild(pauseBtn);
 
-  const scrubberRow = document.createElement('div');
-  scrubberRow.className = 'ytpp-scrubber-row';
-  const scrubberLabel = document.createElement('span');
-  scrubberLabel.className = 'ytpp-scrubber-label';
-  scrubberLabel.textContent = '0:00';
-  scrubberRow.appendChild(scrubberLabel);
+  const scrubberLabel = createEl('span', 'ytpp-scrubber-label', '0:00');
+  controls.appendChild(scrubberLabel);
+  controls.appendChild(createEl('span', 'ytpp-live-badge', 'LIVE'));
+
   const scrubber = document.createElement('input');
   scrubber.type      = 'range';
   scrubber.className = 'ytpp-scrubber';
@@ -112,8 +144,7 @@
   scrubber.value     = '0';
   scrubber.setAttribute('aria-label', 'Seek (← →)');
   scrubber.title     = 'Seek (← →)';
-  scrubberRow.appendChild(scrubber);
-  controls.appendChild(scrubberRow);
+  controls.appendChild(scrubber);
 
   // ---- Input handlers ------------------------------------------------------
 
@@ -142,7 +173,7 @@
   scrubber.addEventListener('input', () => {
     if (!scrubVideo) return;
     scrubVideo.currentTime = parseFloat(scrubber.value);
-    updateTimeLabel();
+    updateScrubberUI();
   });
 
   // VOD: unpin when the scrubber is released at the end. 'ended' won't fire
@@ -181,9 +212,8 @@
   function ensurePinButton() {
     const vp = getPreviewEl();
     if (!vp || vp.querySelector('.ytpp-pin-btn')) return;
-    const btn = document.createElement('button');
-    btn.className = 'ytpp-pin-btn';
-    btn.textContent = '📌 Pin';
+    const btn = createEl('button', 'ytpp-pin-btn');
+    btn.append(icon('pin'), 'Pin');
     btn.title = 'Pin this preview so it keeps playing';
     vp.appendChild(btn);
   }
@@ -285,12 +315,20 @@
 
   // ---- Scrubber ------------------------------------------------------------
 
-  // "1:23 / 10:45" for VOD, "1:23 · LIVE" for live streams.
-  function updateTimeLabel() {
+  // Paints the played portion of the track from the scrubber's current
+  // value/range (Chrome can't style a range input's lower track natively),
+  // and sets the label: "1:23 / 10:45" for VOD, "1:23" plus the LIVE badge
+  // for live streams.
+  function updateScrubberUI() {
+    const min = parseFloat(scrubber.min) || 0;
+    const max = parseFloat(scrubber.max);
+    const progress = max > min ? (parseFloat(scrubber.value) - min) / (max - min) : 0;
+    scrubber.style.setProperty('--ytpp-progress', `${Math.max(0, Math.min(1, progress)) * 100}%`);
+
     if (!scrubVideo) { scrubberLabel.textContent = '0:00'; return; }
     const cur = formatTime(scrubVideo.currentTime);
     if (pinnedIsLive) {
-      scrubberLabel.textContent = `${cur} · LIVE`;
+      scrubberLabel.textContent = cur;
       return;
     }
     const dur = isFinite(scrubVideo.duration) ? scrubVideo.duration : scrubEndThreshold;
@@ -307,7 +345,7 @@
                                           scrubVideo.currentTime + delta));
     scrubVideo.currentTime = target;
     scrubber.value = String(target);
-    updateTimeLabel();
+    updateScrubberUI();
     flashControls();
   }
 
@@ -339,7 +377,7 @@
 
     syncRange();
     scrubber.value = String(video.currentTime);
-    updateTimeLabel();
+    updateScrubberUI();
 
     // 'seeking' fires with the target before timeupdate catches up, so this
     // keeps lastKnownTime current right up to the moment of teardown.
@@ -351,7 +389,7 @@
       if (isLive) syncRange();
       if (!scrubbing) {
         scrubber.value = String(scrubVideo.currentTime);
-        updateTimeLabel();
+        updateScrubberUI();
       }
     };
 
@@ -438,15 +476,16 @@
     scrubber.min              = '0';
     scrubber.value            = '0';
     scrubber.max              = '1';
-    scrubberLabel.textContent = '0:00';
+    updateScrubberUI();
   }
 
   // ---- Pin / Unpin ---------------------------------------------------------
 
   function setPauseState(paused) {
     previewPaused = paused;
-    pauseBtn.textContent = paused ? '▶ Play'      : '⏸ Pause';
-    pauseBtn.title       = paused ? 'Play (Space)' : 'Pause (Space)';
+    pauseBtn.replaceChildren(icon(paused ? 'play' : 'pause'));
+    pauseBtn.title = paused ? 'Play (Space)' : 'Pause (Space)';
+    pauseBtn.setAttribute('aria-label', paused ? 'Play' : 'Pause');
   }
 
   function togglePause() {
@@ -481,6 +520,7 @@
     // live from the LIVE badge on the card instead.
     const isLive = !!card.querySelector('.ytBadgeShapeThumbnailLive');
     pinnedIsLive = isLive;
+    controls.toggleAttribute('ytpp-live', isLive);
 
     // Arm page_shim.js synchronously before the element moves.
     document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions, isLive } }));

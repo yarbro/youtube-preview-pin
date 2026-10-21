@@ -1,7 +1,28 @@
+/* ---- Tokens ----------------------------------------------------------------
+ * Shared by every piece of extension UI. Prefixed so they can't collide with
+ * YouTube's own custom properties. */
+:root {
+  --ytpp-gradient: linear-gradient(90deg, #3b82f6, #8b5cf6, #a855f7, #8b5cf6, #3b82f6);
+  --ytpp-focus: #8b5cf6;
+  --ytpp-surface: rgba(18, 18, 18, 0.78);
+  --ytpp-surface-hover: rgba(48, 48, 48, 0.92);
+  --ytpp-border: rgba(255, 255, 255, 0.14);
+  --ytpp-font: 'Roboto', Arial, sans-serif;
+}
+
+/* SVG icons built by content.js. */
+.ytpp-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
 /* ---- Backdrop -------------------------------------------------------------
  * Full-screen fixed overlay between the pinned preview (z 99999) and all
  * YouTube page content (z ~0). Two jobs:
- *   1. Darkens the page behind the centered preview.
+ *   1. Darkens and blurs the page behind the centered preview.
  *   2. Absorbs all mouse events so YouTube's card hover handlers never fire
  *      while pinned. Clicking it unpins (caught by the document click listener).
  */
@@ -9,7 +30,9 @@
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 0, 0, 0.72);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   z-index: 99998;
   /* Hints that clicking it closes the pin, like a lightbox. */
   cursor: zoom-out;
@@ -17,7 +40,7 @@
 
 body.ytpp-active #ytpp-backdrop {
   display: block;
-  animation: ytpp-fade-in 0.18s ease-out;
+  animation: ytpp-fade-in 0.2s ease-out;
 }
 
 @keyframes ytpp-fade-in {
@@ -32,24 +55,35 @@ body.ytpp-active {
 
 /* ---- Pinned preview -------------------------------------------------------
  * Fixed + centered. Scale is driven by --ytpp-scale (set from JS based on
- * viewport width), falling back to 1.5 if the variable isn't set yet.
+ * viewport size), falling back to 1.5 if the variable isn't set yet.
  *
  * pointer-events:none on the element itself prevents YouTube's mouseleave
  * handler from firing when the cursor is on the backdrop; children get
  * pointer-events:auto so controls and the pin button stay interactive.
+ *
+ * Current previews pad the host 12px around the media; padding:0 makes the
+ * rounded corners and shadow hug the video instead of that empty ring.
  */
 ytd-video-preview[ytpp-pinned] {
   position: fixed !important;
   top: 50% !important;
   left: 50% !important;
+  padding: 0 !important;
   transform: translate(-50%, -50%) scale(var(--ytpp-scale, 1.5)) !important;
   transform-origin: center center !important;
   z-index: 99999 !important;
   transition: none !important;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.85);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 24px 80px rgba(0, 0, 0, 0.85);
   border-radius: 12px;
   overflow: hidden !important;
   pointer-events: none !important;
+  /* `scale` composes with the !important transform above, which an
+   * animated `transform` couldn't override. */
+  animation: ytpp-pop-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes ytpp-pop-in {
+  from { scale: 0.96; }
 }
 
 ytd-video-preview[ytpp-pinned] * {
@@ -108,19 +142,22 @@ body.ytpp-active .ytdVideoPreviewLoaderVideoPreviewContainer:has(> ytd-video-pre
 
 /* ---- Pin button -----------------------------------------------------------
  * Injected into ytd-video-preview by content.js. Hidden by default; fades in
- * on hover. Hidden entirely while pinned (unpin lives in the controls bar).
+ * on hover. Hidden entirely while pinned (unpin is the close button).
  */
 .ytpp-pin-btn {
   position: absolute;
   top: 14px;
   left: 14px;
   z-index: 10001;
-  background: rgba(20, 20, 20, 0.82);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--ytpp-surface);
   color: #fff;
   border: 1px solid transparent;
-  border-radius: 20px;
-  padding: 5px 13px;
-  font: 500 12px/1.4 'Roboto', Arial, sans-serif;
+  border-radius: 999px;
+  padding: 5px 13px 5px 9px;
+  font: 500 12px/1.4 var(--ytpp-font);
   letter-spacing: 0.2px;
   cursor: pointer;
   white-space: nowrap;
@@ -128,10 +165,16 @@ body.ytpp-active .ytdVideoPreviewLoaderVideoPreviewContainer:has(> ytd-video-pre
   transition: opacity 0.15s, background 0.15s;
   pointer-events: none;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   user-select: none;
   -webkit-user-select: none;
+}
+
+.ytpp-pin-btn .ytpp-icon {
+  width: 14px;
+  height: 14px;
+  transform: rotate(45deg);
 }
 
 /* Animated gradient border. The pseudo fills the parent's box with the
@@ -140,18 +183,15 @@ body.ytpp-active .ytdVideoPreviewLoaderVideoPreviewContainer:has(> ytd-video-pre
  * the border area is painted, not the area behind the parent. inset: -1px
  * makes the pseudo's outer edge align with the parent's border slot.
  *
- * Shared between the pin button (always-on) and the hover state of the
- * unpin/pause buttons and scrubber row. */
+ * Always on for the pin button; on hover for the close button. */
 .ytpp-pin-btn::before,
-.ytpp-unpin-btn::before,
-.ytpp-pause-btn::before,
-.ytpp-scrubber-row::before {
+.ytpp-unpin-btn::before {
   content: '';
   position: absolute;
   inset: -1px;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(90deg, #3b82f6, #8b5cf6, #a855f7, #8b5cf6, #3b82f6);
+  background: var(--ytpp-gradient);
   background-size: 200% 100%;
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -165,16 +205,12 @@ body.ytpp-active .ytdVideoPreviewLoaderVideoPreviewContainer:has(> ytd-video-pre
   animation: ytpp-pin-border-shift 4s linear infinite;
 }
 
-.ytpp-unpin-btn::before,
-.ytpp-pause-btn::before,
-.ytpp-scrubber-row::before {
+.ytpp-unpin-btn::before {
   opacity: 0;
   transition: opacity 0.15s;
 }
 
-.ytpp-unpin-btn:hover::before,
-.ytpp-pause-btn:hover::before,
-.ytpp-scrubber-row:hover::before {
+.ytpp-unpin-btn:hover::before {
   opacity: 1;
   animation: ytpp-pin-border-shift 4s linear infinite;
 }
@@ -195,18 +231,98 @@ body.ytpp-on-short .ytpp-pin-btn {
 }
 
 ytd-video-preview:not([hidden]):hover .ytpp-pin-btn:hover {
-  background: rgba(50, 50, 50, 0.92);
+  background: var(--ytpp-surface-hover);
 }
 
 ytd-video-preview[ytpp-pinned] .ytpp-pin-btn {
   display: none;
 }
 
-/* ---- Controls bar ---------------------------------------------------------
- * Positioned absolutely inside ytd-video-preview so YouTube's body transform
- * doesn't affect its containing block. Revealed on hover when pinned, and
- * briefly after pinning / keyboard input via [ytpp-show-controls] (added by
- * flashControls in content.js) so they're discoverable.
+/* ---- Close button and shortcut hints --------------------------------------
+ * Appended to <body> by content.js and shown only while pinned. They sit on
+ * the backdrop, outside the preview, so they're always visible and never
+ * overlap the video's own controls. */
+.ytpp-unpin-btn {
+  display: none;
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 100000;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  padding: 0;
+  background: var(--ytpp-surface);
+  color: #fff;
+  border: 1px solid var(--ytpp-border);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  transition: background 0.15s;
+}
+
+.ytpp-unpin-btn:hover {
+  background: var(--ytpp-surface-hover);
+}
+
+.ytpp-hints {
+  display: none;
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 100000;
+  gap: 20px;
+  color: rgba(255, 255, 255, 0.7);
+  font: 400 12px/1 var(--ytpp-font);
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ytpp-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ytpp-hint kbd {
+  min-width: 12px;
+  padding: 3px 6px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  font: 500 11px/1 var(--ytpp-font);
+  text-align: center;
+}
+
+body.ytpp-active .ytpp-unpin-btn {
+  display: grid;
+  animation: ytpp-fade-in 0.2s ease-out;
+}
+
+body.ytpp-active .ytpp-hints {
+  display: flex;
+  animation: ytpp-fade-in 0.2s ease-out;
+}
+
+/* Short windows: the pinned preview fills most of the height, so the hints
+ * would sit on top of the video. */
+@media (max-height: 560px) {
+  body.ytpp-active .ytpp-hints {
+    display: none;
+  }
+}
+
+/* ---- Playback bar ---------------------------------------------------------
+ * Positioned absolutely along the bottom of ytd-video-preview so YouTube's
+ * body transform doesn't affect its containing block. Counter-scaled so it
+ * renders at natural size, and widened by the same factor so it still spans
+ * the full preview. Revealed on hover when pinned, and briefly after pinning /
+ * keyboard input via [ytpp-show-controls] (added by flashControls in
+ * content.js) so it's discoverable.
  *
  * visibility:hidden (not display:none) keeps the fade transition working and
  * blocks interaction even though [ytpp-pinned] * forces pointer-events:auto.
@@ -214,22 +330,24 @@ ytd-video-preview[ytpp-pinned] .ytpp-pin-btn {
 #ytpp-controls {
   display: flex;
   position: absolute;
-  top: 20px;
-  left: 20px;
+  left: 0;
+  bottom: 0;
   z-index: 10002;
-  flex-direction: column;
-  gap: 8px;
-  align-items: stretch;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  /* The tall top padding is room for the scrim to fade in over the video. */
+  padding: 32px 16px 10px 8px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.45) 55%, transparent);
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.2s, visibility 0.2s;
 }
 
-.ytpp-controls-btns {
-  display: flex;
-  flex-direction: row;
-  gap: 8px;
-  align-items: center;
+ytd-video-preview[ytpp-pinned] #ytpp-controls {
+  width: calc(100% * var(--ytpp-scale, 1.5));
+  transform: scale(calc(1 / var(--ytpp-scale, 1.5)));
+  transform-origin: bottom left;
 }
 
 ytd-video-preview[ytpp-pinned]:has(:hover) #ytpp-controls,
@@ -238,90 +356,82 @@ ytd-video-preview[ytpp-pinned][ytpp-show-controls] #ytpp-controls {
   visibility: visible;
 }
 
-/* Counter-scale so the controls render at natural size despite the parent transform. */
-ytd-video-preview[ytpp-pinned] #ytpp-controls {
-  transform: scale(calc(1 / var(--ytpp-scale, 1.5)));
-  transform-origin: top left;
-}
-
-.ytpp-unpin-btn,
 .ytpp-pause-btn {
-  position: relative;
-  background: rgba(20, 20, 20, 0.72);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 20px;
-  padding: 9px 22px;
-  font: 500 14px/1.4 'Roboto', Arial, sans-serif;
-  letter-spacing: 0.2px;
-  cursor: pointer;
-  white-space: nowrap;
-  text-align: center;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
   margin: 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  padding: 0;
+  color: #fff;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
   transition: background 0.15s;
-  user-select: none;
-  -webkit-user-select: none;
 }
 
-/* Pin a min-width on the pause/play toggle so the button doesn't jiggle as
- * the label switches between "⏸ Pause" and "▶ Play". */
-.ytpp-pause-btn {
-  min-width: 100px;
-}
-
-.ytpp-unpin-btn:hover,
 .ytpp-pause-btn:hover {
-  background: rgba(20, 20, 20, 0.88);
+  background: rgba(255, 255, 255, 0.14);
 }
 
-/* ---- Scrubber ------------------------------------------------------------- */
-.ytpp-scrubber-row {
-  position: relative;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  background: rgba(20, 20, 20, 0.72);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 20px;
-  padding: 9px 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-  box-sizing: border-box;
+.ytpp-pause-btn .ytpp-icon {
+  width: 26px;
+  height: 26px;
 }
 
 .ytpp-scrubber-label {
   color: #fff;
-  font: 500 12px/1 'Roboto', Arial, sans-serif;
+  font: 500 13px/1 var(--ytpp-font);
   /* Fixed-width digits so the label doesn't jiggle as time ticks. */
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.2px;
   white-space: nowrap;
-  opacity: 0.85;
+  opacity: 0.9;
   flex-shrink: 0;
   user-select: none;
   -webkit-user-select: none;
 }
 
+.ytpp-live-badge {
+  display: none;
+  flex-shrink: 0;
+  padding: 3px 6px;
+  color: #fff;
+  background: #e1002d;
+  border-radius: 4px;
+  font: 700 11px/1 var(--ytpp-font);
+  letter-spacing: 0.5px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#ytpp-controls[ytpp-live] .ytpp-live-badge {
+  display: inline-block;
+}
+
+/* The input is a tall, transparent hit area; the visible bar is the track.
+ * --ytpp-progress (set by content.js) sizes the gradient fill for the played
+ * portion, which Chrome can't style natively on a range input. */
 .ytpp-scrubber {
-  /* Zero intrinsic width: the buttons row above sets #ytpp-controls' width,
-   * and this row stretches to match it (align-items: stretch), with the
-   * scrubber flexing into whatever space the label leaves. */
   flex: 1;
   width: 0;
   min-width: 0;
-  height: 4px;
+  height: 20px;
+  margin: 0;
   -webkit-appearance: none;
   appearance: none;
-  background: rgba(255, 255, 255, 0.35);
-  border-radius: 2px;
-  outline: none;
+  background: transparent;
   cursor: pointer;
-  margin: 0;
+}
+
+.ytpp-scrubber::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background:
+    linear-gradient(90deg, #3b82f6, #8b5cf6, #a855f7) 0 0 / var(--ytpp-progress, 0%) 100% no-repeat,
+    rgba(255, 255, 255, 0.3);
 }
 
 .ytpp-scrubber::-webkit-slider-thumb {
@@ -329,20 +439,39 @@ ytd-video-preview[ytpp-pinned] #ytpp-controls {
   appearance: none;
   width: 13px;
   height: 13px;
+  /* Centers the thumb on the 4px track. */
+  margin-top: -4.5px;
   border-radius: 50%;
   background: #fff;
-  cursor: pointer;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   transition: transform 0.1s;
 }
 
-.ytpp-scrubber:hover::-webkit-slider-thumb {
-  transform: scale(1.25);
+.ytpp-scrubber:hover::-webkit-slider-thumb,
+.ytpp-scrubber:active::-webkit-slider-thumb {
+  transform: scale(1.3);
 }
 
-/* ---- Hide YouTube player controls and loading spinner when pinned and not hovering
- * visibility, not opacity: opacity is a group effect descendants can't
- * override, so if a YouTube variant nests the media inside one of these
+/* ---- Keyboard focus ------------------------------------------------------- */
+.ytpp-pin-btn:focus-visible,
+.ytpp-pause-btn:focus-visible,
+.ytpp-unpin-btn:focus-visible {
+  outline: 2px solid var(--ytpp-focus);
+  outline-offset: 2px;
+}
+
+.ytpp-scrubber:focus-visible {
+  outline: none;
+}
+
+.ytpp-scrubber:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--ytpp-focus);
+}
+
+/* ---- YouTube's own preview controls -----------------------------------------
+ * Hide YouTube's player controls and loading spinner when pinned and not
+ * hovering. visibility, not opacity: opacity is a group effect descendants
+ * can't override, so if a YouTube variant nests the media inside one of these
  * containers, opacity:0 would take the video down with it. visibility is
  * inherited and child-overridable — the media rule below wins. */
 ytd-video-preview[ytpp-pinned] yt-inline-player-controls,
@@ -357,6 +486,14 @@ ytd-video-preview[ytpp-pinned][ytpp-show-controls] yt-inline-player-controls {
   pointer-events: auto !important;
 }
 
+/* The playback bar replaces YouTube's bottom progress bar and remaining-time
+ * badge, which would otherwise sit underneath it. Mute and CC (top right)
+ * stay. */
+ytd-video-preview[ytpp-pinned] yt-progress-bar,
+ytd-video-preview[ytpp-pinned] .ytInlinePlayerControlsBottomRightControls {
+  display: none !important;
+}
+
 /* Never let the media itself be hidden while pinned, whichever container or
  * class YouTube toggles around it. visibility:visible beats any hidden
  * ancestor; display/opacity cover direct hits on these elements. */
@@ -365,4 +502,16 @@ body.ytpp-active ytd-video-preview video {
   display: block !important;
   visibility: visible !important;
   opacity: 1 !important;
+}
+
+/* ---- Reduced motion ------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  ytd-video-preview[ytpp-pinned],
+  body.ytpp-active #ytpp-backdrop,
+  body.ytpp-active .ytpp-unpin-btn,
+  body.ytpp-active .ytpp-hints,
+  .ytpp-pin-btn::before,
+  .ytpp-unpin-btn:hover::before {
+    animation: none !important;
+  }
 }
