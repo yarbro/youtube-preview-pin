@@ -200,9 +200,12 @@
   // or its ancestors; while pinned the backdrop absorbs all real pointer
   // traffic, so no leave event touching either is legitimate.
   // node.contains(node) is true for self.
+  // The preview, anything inside it, and anything around it: current
+  // previews live in a loader container under ytd-app (not inside the card),
+  // and YouTube dismisses the preview on that container's mouseleave.
   function isPinnedLeaveTarget(t) {
     if (!t || t.nodeType !== 1) return false;
-    if (lockedVP?.contains(t)) return true;
+    if (lockedVP && (lockedVP.contains(t) || t.contains(lockedVP))) return true;
     return !!(t.closest?.('[ytpp-pinned-card]') || t.querySelector?.('[ytpp-pinned-card]'));
   }
 
