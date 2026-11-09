@@ -522,14 +522,19 @@
     pinnedIsLive = isLive;
     controls.toggleAttribute('ytpp-live', isLive);
 
-    // Arm page_shim.js synchronously before the element moves.
-    document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions, isLive } }));
-
     // Measure before ytpp-pinned applies position:fixed (which would change
     // the size).
     pinnedNaturalW = vp.offsetWidth  || Math.round(window.innerWidth * 0.25);
     pinnedNaturalH = vp.offsetHeight || Math.round(pinnedNaturalW * 9 / 16);
-    document.documentElement.style.setProperty('--ytpp-scale', computePinScale(pinnedNaturalW, pinnedNaturalH));
+    const scale = computePinScale(pinnedNaturalW, pinnedNaturalH);
+
+    // Arm page_shim.js synchronously before the element moves. targetHeight
+    // is the pinned video's height in device pixels; page_shim.js uses it to
+    // pick a stream quality, since the player only knows its unscaled size.
+    const targetHeight = pinnedNaturalH * scale * window.devicePixelRatio;
+    document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions, isLive, targetHeight } }));
+
+    document.documentElement.style.setProperty('--ytpp-scale', scale);
 
     document.body.classList.add('ytpp-active');
     vp.setAttribute('ytpp-pinned', '');

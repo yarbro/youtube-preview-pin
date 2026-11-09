@@ -26,6 +26,9 @@
   let userInteractedAt    = 0; // performance.now() of the last user input inside the preview
   let captionObserver     = null;
   let userToggledCaptions = false; // sticky: once the user touches CC, stop auto-disabling
+  let qualityTargetH      = 0;     // pinned video height in device pixels; 0 = don't touch quality
+  let qualityBoosted      = false; // we forced a quality and owe the player a reset on unpin
+  let qualityRetryTimer   = null;
 
   // ---- EventTarget / ResizeObserver wrap -----------------------------------
 
@@ -280,6 +283,82 @@
     captionObserver = null;
   }
 
+  // ---- Quality -------------------------------------------------------------
+  // The preview is the real stream, but the player picks its quality for the
+  // thumbnail-sized box it lives in (typically 480p). Pinning enlarges it
+  // with a CSS scale the player never sees, so ask for a quality that fits
+  // the pinned size instead, and hand control back on unpin.
+
+  const QUALITY_HEIGHTS = { tiny: 144, small: 240, medium: 360, large: 480, hd720: 720, hd1080: 1080 };
+  const QUALITY_PREF_KEY = 'yt-player-quality';
+
+  // Smallest available level that covers the pinned height (with 10% slack,
+  // so a 740px-tall pin settles for 720p), capped at 1080p.
+  function pickQuality(levels, targetH) {
+    const known = levels
+      .filter((l) => QUALITY_HEIGHTS[l])
+      .sort((a, b) => QUALITY_HEIGHTS[a] - QUALITY_HEIGHTS[b]);
+    if (!known.length) return null;
+    return known.find((l) => QUALITY_HEIGHTS[l] >= targetH * 0.9) ?? known[known.length - 1];
+  }
+
+  // setPlaybackQualityRange also saves the level as the user's quality
+  // preference, which the watch page would then pick up. Put the saved
+  // preference back straight away so a pin never changes it.
+  function setQualityRange(player, level) {
+    let saved    = null;
+    let readable = true;
+    try { saved = localStorage.getItem(QUALITY_PREF_KEY); } catch (_) { readable = false; }
+    try {
+      player.setPlaybackQualityRange(level, level);
+    } finally {
+      if (readable) {
+        try {
+          if (saved === null) localStorage.removeItem(QUALITY_PREF_KEY);
+          else localStorage.setItem(QUALITY_PREF_KEY, saved);
+        } catch (_) {}
+      }
+    }
+  }
+
+  // The quality list is empty until the stream's formats have loaded, so
+  // retry for a few seconds if the pin landed that early.
+  function boostQuality(attempt = 0) {
+    clearTimeout(qualityRetryTimer);
+    qualityRetryTimer = null;
+    if (!pinned || !qualityTargetH) return;
+
+    const player = getPlayer();
+    const level  = typeof player?.setPlaybackQualityRange === 'function'
+      ? pickQuality(player.getAvailableQualityLevels?.() ?? [], qualityTargetH)
+      : null;
+    if (!level) {
+      if (attempt < 10) {
+        qualityRetryTimer = setTimeout(() => {
+          try { boostQuality(attempt + 1); } catch (_) {}
+        }, 300);
+      }
+      return;
+    }
+
+    const current = QUALITY_HEIGHTS[player.getPlaybackQuality?.()] ?? 0;
+    if (QUALITY_HEIGHTS[level] <= current) return;
+    setQualityRange(player, level);
+    qualityBoosted = true;
+  }
+
+  // Back to automatic, so later hover previews don't stream at the pinned
+  // quality.
+  function restoreQuality() {
+    clearTimeout(qualityRetryTimer);
+    qualityRetryTimer = null;
+    qualityTargetH    = 0;
+    if (!qualityBoosted) return;
+    qualityBoosted = false;
+    const player = getPlayer();
+    if (typeof player?.setPlaybackQualityRange === 'function') setQualityRange(player, 'auto');
+  }
+
   function unmute() {
     const player = getPlayer();
     if (player) {
@@ -399,6 +478,8 @@
     lockedVP         = document.querySelector(YT.PREVIEW);
 
     try { unmute(); } catch (_) {}
+    qualityTargetH = Number(e.detail?.targetHeight) || 0;
+    try { boostQuality(); } catch (_) {}
     if (e.detail?.disableCaptions) try { startCaptionGuard(); } catch (_) {}
     try {
       const video = getVideo();
@@ -417,6 +498,7 @@
       patchPause(video);
       attachPauseGuard(video); // detaches the old guard internally
       unmute();
+      boostQuality(); // no-op if the new element kept the pinned quality
     } catch (_) {}
   });
 
@@ -429,6 +511,7 @@
     pinned         = false;
     pinnedIsLive   = false;
 
+    try { restoreQuality(); } catch (_) {}
     try {
       stopCaptionGuard();
       unpatchPause(getVideo());

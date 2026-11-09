@@ -1,6 +1,6 @@
 # YouTube Preview Pin
 
-Chrome extension that pins YouTube's hover preview so it keeps playing without you holding the mouse over the thumbnail. The preview centers on screen, scales up, and unmutes.
+Chrome extension that pins YouTube's hover preview so it keeps playing without you holding the mouse over the thumbnail. The preview centers on screen, scales up, unmutes, and switches to a quality that fits its new size (up to 1080p).
 
 It's a useful filter for deciding whether a video is worth your time before committing to the watch page (and the ad that fires when you load it). This isn't an ad blocker, though. You should still support the creators of your favorite content, either directly through memberships and donations or by watching the ads on their videos.
 
@@ -28,7 +28,7 @@ Settings (right-click the toolbar icon → Options) has one toggle: whether to a
 
 ## Limitations
 
-- **It's not full resolution.** YouTube serves the hover preview as its own lower-quality clip.
+- **Quality tops out at 1080p.** Hover previews normally play at about 480p because the player sizes its stream for the thumbnail. Pinning asks for a quality that fits the enlarged preview, capped at 1080p, and hands control back to YouTube on unpin. Your saved YouTube quality preference is left untouched.
 - It doesn't work on Shorts, or on the mobile site (`m.youtube.com`), which has no hover previews.
 - If YouTube renames an internal class or custom element, the relevant selectors will need updating. They're collected in a `YT` object near the top of `content.js` and `page_shim.js`, plus the `ytdVideoPreview*` overrides in `styles.css`.
 
