@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Toolbar sizes (16 and 32 px): the same drawing as icon.svg with a
+       larger card, pin and gap and no shadows, so it survives the downscale. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="0.55" stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+    <linearGradient id="pinfill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fde047"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <path id="pin" d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/>
+    <mask id="cut" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+      <rect width="128" height="128" fill="#fff"/>
+      <use href="#pin" transform="translate(84 44) rotate(45) scale(3.1) translate(-12 -12)" fill="#000" stroke="#000" stroke-width="4.6" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <g mask="url(#cut)">
+    <rect x="10" y="44" width="92" height="68" rx="14" fill="#fff"/>
+    <path d="M42 62v32l28-16z" fill="#6d28d9" stroke="#6d28d9" stroke-width="8" stroke-linejoin="round"/>
+  </g>
+  <use href="#pin" transform="translate(84 44) rotate(45) scale(3.1) translate(-12 -12)" fill="url(#pinfill)"/>
+</svg>
