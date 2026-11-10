@@ -111,6 +111,17 @@ body.ytpp-active ytd-video-preview {
   opacity: 1 !important;
 }
 
+/* Tagged by content.js when YouTube hides the pinned preview or an element
+ * wrapping its <video>. Overriding from here, instead of clearing YouTube's
+ * inline style or hidden attribute, means YouTube's own state is intact
+ * again the moment the pin ends. */
+ytd-video-preview[ytpp-pinned][ytpp-keep-visible],
+ytd-video-preview[ytpp-pinned] [ytpp-keep-visible] {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
 /* Current previews fade the player layer out by dropping the
  * ytdVideoPreviewPlaying class, which YouTube rewrites along with the rest of
  * the class attribute on hover-out — so it can't be guarded, only overridden.

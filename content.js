@@ -272,9 +272,22 @@
     .observe(document.body, { childList: true, subtree: true });
 
   // ---- Hidden-element guard ------------------------------------------------
-  // Reverts hidden / display:none / visibility:hidden / opacity:0 applied
-  // anywhere in the pinned preview subtree, and detects structural teardown
-  // (the inline player removing its own children) so we can unpin gracefully.
+  // Keeps the pinned preview and the elements wrapping its <video> visible
+  // when YouTube hides them (hidden / display:none / visibility:hidden /
+  // opacity:0), and detects structural teardown (the inline player removing
+  // its own children) so we can unpin gracefully.
+  //
+  // Two rules, both learned the hard way:
+  //   - Only that chain is guarded. Everything else in the preview (loading
+  //     spinner, overlays, buttons) is YouTube's to show and hide.
+  //   - YouTube's own hide is never undone. The element is tagged
+  //     [ytpp-keep-visible] and styles.css overrides the hide while pinned;
+  //     unpinning removes the tag and YouTube's state applies again.
+  // Clearing YouTube's inline display:none instead leaves the element stuck
+  // visible for good — YouTube believes it's hidden and won't hide it again.
+  // That's how the loading spinner used to end up over every later preview
+  // after a pin that had buffered.
+  const KEEP_VISIBLE = 'ytpp-keep-visible';
 
   function startBlockingHidden(vp) {
     stopBlockingHidden();
@@ -315,15 +328,14 @@
           }
           continue;
         }
-        const { attributeName, target: el } = mut;
-        if (attributeName === 'hidden' && el.hasAttribute('hidden')) {
-          el.removeAttribute('hidden');
-        }
-        if (attributeName === 'style') {
-          if (el.style.display    === 'none')      el.style.display    = '';
-          if (el.style.visibility === 'hidden')    el.style.visibility = '';
-          if (parseFloat(el.style.opacity) === 0)  el.style.opacity    = '';
-        }
+        const el    = mut.target;
+        const video = scrubVideo?.isConnected ? scrubVideo : vp.querySelector('video');
+        if (el !== vp && !(video && el.contains(video))) continue;
+        const hiddenByYouTube = el.hasAttribute('hidden')       ||
+                                el.style.display    === 'none'   ||
+                                el.style.visibility === 'hidden' ||
+                                parseFloat(el.style.opacity) === 0;
+        el.toggleAttribute(KEEP_VISIBLE, hiddenByYouTube);
       }
     });
     hiddenBlocker.observe(vp, {
@@ -337,6 +349,7 @@
   function stopBlockingHidden() {
     hiddenBlocker?.disconnect();
     hiddenBlocker = null;
+    for (const el of document.querySelectorAll(`[${KEEP_VISIBLE}]`)) el.removeAttribute(KEEP_VISIBLE);
   }
 
   // ---- Scrubber ------------------------------------------------------------
