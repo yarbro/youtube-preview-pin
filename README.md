@@ -10,6 +10,15 @@ It's a useful filter for deciding whether a video is worth your time before comm
 2. Turn on **Developer mode**
 3. Click **Load unpacked** and pick this folder
 
+## Update
+
+Double-click `update.command` in Finder (macOS), or run `./update.command` from a terminal. It brings this folder up to date with GitHub, then you reload the extension at `chrome://extensions`.
+
+- In a git clone it runs `git pull --ff-only`, and stops without changing anything if you have local changes in the way.
+- In a folder downloaded as a ZIP it downloads the `main` branch and makes the folder match it. Files that no longer exist upstream are deleted, so don't keep your own files in there.
+
+The first time, macOS may refuse to open a downloaded `update.command`; right-click it and choose **Open** instead. There is no Windows version.
+
 ## Use
 
 Hover a thumbnail, wait for the preview to start, then click **Pin** in the top-left of the preview. Unpin with the **✕** button in the top-right corner, by clicking the backdrop, or by pressing Escape.
