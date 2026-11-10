@@ -22,14 +22,14 @@ While pinned:
 | `←` / `→` | Seek 5 seconds |
 | `Esc` | Unpin |
 
-Hover the preview to show the playback bar along its bottom edge: play / pause, the time, and a scrubber (VOD videos show elapsed / total time; live streams can scrub back through the DVR window).
+Hover the preview to show the playback bar along its bottom edge: play / pause, the time, and a scrubber (VOD videos show elapsed / total time; live streams can scrub back through the DVR window, show how far behind live you are, and jump back with the **LIVE** badge). Hovering or dragging the scrubber shows the time at that point, with a frame thumbnail for VOD videos.
 
 Settings (right-click the toolbar icon → Options) has one toggle: whether to also turn off captions when pinning.
 
 ## Limitations
 
 - **Quality tops out at 1080p.** Hover previews normally play at about 480p because the player sizes its stream for the thumbnail. Pinning asks for a quality that fits the enlarged preview, capped at 1080p, and hands control back to YouTube on unpin. Your saved YouTube quality preference is left untouched.
-- It doesn't work on Shorts, or on the mobile site (`m.youtube.com`), which has no hover previews.
+- It doesn't work on Shorts or sponsored cards (no Pin button is shown), or on the mobile site (`m.youtube.com`), which has no hover previews.
 - If YouTube renames an internal class or custom element, the relevant selectors will need updating. They're collected in a `YT` object near the top of `content.js` and `page_shim.js`, plus the `ytdVideoPreview*` overrides in `styles.css`.
 
 ## License

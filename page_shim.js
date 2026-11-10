@@ -536,6 +536,43 @@
     } catch (_) {}
   });
 
+  // content.js asks how the player sees the stream: whether it's live, its
+  // seekable (DVR) window in media time, and whether playback is at the live
+  // edge. Not gated on `pinned` — the first ask comes just before ytpp-pin,
+  // to decide whether the pin is a live one. Answered synchronously, as JSON
+  // so it crosses to the isolated world intact.
+  document.addEventListener('ytpp-live-state-request', () => {
+    let detail = '';
+    try {
+      const player = getPlayer();
+      const isLive = player?.getVideoData?.()?.isLive === true;
+      const state  = isLive ? player.getProgressState?.() : null;
+      detail = JSON.stringify({
+        isLive,
+        start:  state?.seekableStart,
+        end:    state?.seekableEnd,
+        atHead: state?.isAtLiveHead === true,
+      });
+    } catch (_) {}
+    document.dispatchEvent(new CustomEvent('ytpp-live-state', { detail }));
+  });
+
+  // content.js asks for the pinned video's storyboard spec (the sprite sheets
+  // of frame thumbnails YouTube ships with the player response) the first
+  // time the scrubber is hovered. Answered synchronously, as a plain string
+  // so it crosses to the isolated world intact. Live streams use a different
+  // renderer and get an empty answer.
+  document.addEventListener('ytpp-storyboard-request', () => {
+    if (!pinned) return;
+    let spec = '';
+    try {
+      spec = getPlayer()?.getPlayerResponse?.()?.storyboards?.playerStoryboardSpecRenderer?.spec ?? '';
+    } catch (_) {}
+    document.dispatchEvent(new CustomEvent('ytpp-storyboard', {
+      detail: typeof spec === 'string' ? spec : '',
+    }));
+  });
+
   // Pause the video at the HTMLMediaElement level for the duration of a
   // scrub drag so natural playback can't carry currentTime into 'ended'
   // (which makes YouTube reload the source and the element disappear).

@@ -14,6 +14,10 @@
       'yt-lockup-view-model', // current card element; the ytd-* renderers above are legacy
     ].join(','),
     SHORT_CARD: 'ytm-shorts-lockup-view-model, a[href*="/shorts/"]',
+    // Sponsored cards: the ad slot wraps the card, and the "Sponsored" badge
+    // sits inside it.
+    AD_WRAPPER: 'ytd-ad-slot-renderer, ytd-in-feed-ad-layout-renderer',
+    AD_MARKER:  'ytd-ad-slot-renderer, ad-badge-view-model',
     // Current previews stay in the DOM and toggle these classes instead of
     // the legacy `hidden` attribute.
     PREVIEW_HOST:   'ytdVideoPreviewHost',
@@ -44,6 +48,11 @@
   let lastKnownTime      = 0;
   let scrubAliveRafId    = null;
   let controlsFlashTimer = null;
+  let liveState          = null; // the player's live window, as last reported by page_shim.js
+  let storyboard         = null; // parsed frame-thumbnail spec for the pinned video (VOD only)
+  let storyboardAskedAt  = 0;
+  let wantedFrame        = null; // the frame the scrubber preview should be showing
+  const sheetState       = new Map(); // sprite-sheet URL -> 'loading' | 'loaded' | 'failed'
 
   // ---- Utilities -----------------------------------------------------------
 
@@ -55,6 +64,9 @@
   };
   const findCard         = (el) => el?.closest?.(YT.CARDS) ?? null;
   const isShortCard      = (card) => !!card.querySelector(YT.SHORT_CARD);
+  // The hovered "card" can be the feed item around the ad slot or the lockup
+  // inside it, so look both ways.
+  const isAdCard         = (card) => !!(card.closest(YT.AD_WRAPPER) || card.querySelector(YT.AD_MARKER));
 
   // naturalW/H are the offset size before ytpp-pinned applies position:fixed.
   // Fit both dimensions so a short, wide window doesn't push the preview's
@@ -124,6 +136,17 @@
   }
   document.body.appendChild(hints);
 
+  // Frame thumbnail + time shown above the scrubber while it's hovered or
+  // dragged. On <body> rather than inside the preview so the preview's
+  // overflow:hidden can't clip it.
+  const scrubPreview = createEl('div', 'ytpp-scrub-preview');
+  const scrubFrame   = createEl('div', 'ytpp-scrub-frame');
+  const scrubSheet   = createEl('div', 'ytpp-scrub-sheet');
+  const scrubTime    = createEl('span', 'ytpp-scrub-time', '0:00');
+  scrubFrame.appendChild(scrubSheet);
+  scrubPreview.append(scrubFrame, scrubTime);
+  document.body.appendChild(scrubPreview);
+
   const controls = createEl('div');
   controls.id = 'ytpp-controls';
 
@@ -133,7 +156,9 @@
 
   const scrubberLabel = createEl('span', 'ytpp-scrubber-label', '0:00');
   controls.appendChild(scrubberLabel);
-  controls.appendChild(createEl('span', 'ytpp-live-badge', 'LIVE'));
+  const liveBadge = createEl('button', 'ytpp-live-badge', 'LIVE');
+  liveBadge.title = 'Jump to live';
+  controls.appendChild(liveBadge);
 
   const scrubber = document.createElement('input');
   scrubber.type      = 'range';
@@ -199,10 +224,11 @@
     if (card === lastSeenCard) return;
     lastSeenCard = card;
     if (!card) return;
-    if (isShortCard(card)) {
-      document.body.classList.add('ytpp-on-short');
+    // No pinning for Shorts or sponsored cards: hide the Pin button.
+    if (isShortCard(card) || isAdCard(card)) {
+      document.body.classList.add('ytpp-no-pin');
     } else {
-      document.body.classList.remove('ytpp-on-short');
+      document.body.classList.remove('ytpp-no-pin');
       currentPreviewCard = card;
     }
   }, true);
@@ -328,12 +354,46 @@
     if (!scrubVideo) { scrubberLabel.textContent = '0:00'; return; }
     const cur = formatTime(scrubVideo.currentTime);
     if (pinnedIsLive) {
-      scrubberLabel.textContent = cur;
+      // Like YouTube's own live bar: just the LIVE badge at the live edge,
+      // and how far behind it you are otherwise (badge greyed out).
+      if (!liveState?.hasRange) { scrubberLabel.textContent = cur; return; }
+      const behind = liveState.end - scrubVideo.currentTime;
+      const atLive = liveState.atHead || behind < 1;
+      controls.toggleAttribute('ytpp-behind-live', !atLive);
+      scrubberLabel.textContent = atLive ? '' : liveOffsetLabel(behind);
       return;
     }
     const dur = isFinite(scrubVideo.duration) ? scrubVideo.duration : scrubEndThreshold;
     scrubberLabel.textContent = isFinite(dur) ? `${cur} / ${formatTime(dur)}` : cur;
   }
+
+  const liveOffsetLabel = (behind) => (behind < 1 ? 'Live' : `-${formatTime(behind)}`);
+
+  // Ask page_shim.js for the player's view of the stream: whether it's live,
+  // its seekable (DVR) window in media time, and whether playback is at the
+  // live edge. Answered synchronously.
+  function queryLiveState() {
+    liveState = null;
+    document.dispatchEvent(new CustomEvent('ytpp-live-state-request'));
+    return liveState;
+  }
+
+  document.addEventListener('ytpp-live-state', (e) => {
+    try {
+      const s     = JSON.parse(e.detail);
+      const start = Number(s.start);
+      const end   = Number(s.end);
+      liveState = {
+        isLive:   s.isLive === true,
+        atHead:   s.atHead === true,
+        start,
+        end,
+        hasRange: isFinite(start) && isFinite(end) && end > start,
+      };
+    } catch (_) {
+      liveState = null;
+    }
+  });
 
   // Keyboard seek (← →). Clamps to the scrubber's range so the VOD
   // stop-1s-short-of-the-end teardown guard applies to key seeks too.
@@ -358,8 +418,16 @@
     // real time so we re-sync on every timeupdate.
     function syncRange() {
       if (isLive) {
-        const s = scrubVideo.seekable;
-        if (s.length > 0) {
+        // Prefer the player's window, whose end is the live edge.
+        // video.seekable ends at the media duration, which YouTube pads
+        // about an hour past the live edge — on that range "now" sits
+        // partway along the bar (3/4 of the way on a three-hour stream).
+        const live = queryLiveState();
+        const s    = scrubVideo.seekable;
+        if (live?.hasRange) {
+          scrubber.min = String(live.start);
+          scrubber.max = String(live.end);
+        } else if (s.length > 0) {
           scrubber.min = String(s.start(0));
           scrubber.max = String(s.end(s.length - 1));
         }
@@ -404,8 +472,8 @@
     videoEndedFn = () => {
       if (isLive) {
         // Live edge reached: seek back 3 s so there's buffered content.
-        const s = scrubVideo?.seekable;
-        if (s?.length > 0) scrubVideo.currentTime = Math.max(s.start(0), s.end(s.length - 1) - 3);
+        const live = queryLiveState();
+        if (live?.hasRange && scrubVideo) scrubVideo.currentTime = Math.max(live.start, live.end - 3);
       } else if (!scrubbing) {
         unpin();
       }
@@ -479,6 +547,150 @@
     updateScrubberUI();
   }
 
+  // ---- Scrubber preview ----------------------------------------------------
+  // YouTube ships "storyboards" with every VOD: sprite sheets of frame
+  // thumbnails at a fixed interval. page_shim.js hands over the spec string
+  // and we show the frame under the pointer above the scrubber. Live streams
+  // have no such spec, so they get the time alone.
+  //
+  // Showing and hiding is pure CSS (scrubber :hover / :active): page_shim.js
+  // swallows leave events around the pinned preview, so a JS hide would
+  // never fire. JS only fills in and positions the tooltip on mousemove.
+
+  const SCRUB_THUMB_W     = 13;  // .ytpp-scrubber thumb width in styles.css
+  const SCRUB_FRAME_MAX_W = 240;
+
+  // Spec: "<url with $L and $N>|<level>|<level>…", each level being
+  // "width#height#frameCount#cols#rows#intervalMs#sheetName#signature".
+  // Levels go from smallest to largest; use the largest.
+  function parseStoryboard(spec) {
+    const parts = String(spec || '').split('|');
+    if (parts.length < 2) return null;
+    const level  = parts.length - 2;
+    const fields = parts[level + 1].split('#');
+    if (fields.length < 8) return null;
+    const [w, h, count, cols, rows, intervalMs] = fields.slice(0, 6).map(Number);
+    if (!(w > 0 && h > 0 && count > 0 && cols > 0 && rows > 0 && intervalMs >= 0)) return null;
+
+    // Function replacers: the values contain "$", which a replacement
+    // string would treat as a pattern.
+    const raw = parts[0].replace('$L', () => String(level)).replace('$N', () => fields[6]) +
+                '&sigh=' + fields[7];
+    // The spec comes from the page, so only accept YouTube's image host.
+    let url;
+    try { url = new URL(raw); } catch (_) { return null; }
+    if (url.protocol !== 'https:' || !/(^|\.)ytimg\.com$/.test(url.hostname)) return null;
+
+    return { w, h, count, cols, rows, intervalMs, urlBase: url.href };
+  }
+
+  document.addEventListener('ytpp-storyboard', (e) => {
+    if (!pinnedCard || storyboard) return;
+    storyboard = parseStoryboard(e.detail);
+    if (!storyboard) return;
+    // The sheet element stays at the frame's native size and is scaled down,
+    // so nothing depends on the sheet image's own dimensions.
+    const k = Math.min(1, SCRUB_FRAME_MAX_W / storyboard.w);
+    scrubFrame.style.width     = `${Math.round(storyboard.w * k)}px`;
+    scrubFrame.style.height    = `${Math.round(storyboard.h * k)}px`;
+    scrubSheet.style.width     = `${storyboard.w}px`;
+    scrubSheet.style.height    = `${storyboard.h}px`;
+    scrubSheet.style.transform = `scale(${k})`;
+  });
+
+  // The player response may not be there yet right after an early pin, so
+  // keep asking (at most twice a second) until a spec arrives.
+  function requestStoryboard() {
+    if (storyboard || pinnedIsLive) return;
+    const now = performance.now();
+    if (now - storyboardAskedAt < 500) return;
+    storyboardAskedAt = now;
+    document.dispatchEvent(new CustomEvent('ytpp-storyboard-request'));
+  }
+
+  function paintScrubFrame(frame) {
+    scrubSheet.style.backgroundImage    = `url("${frame.url}")`;
+    scrubSheet.style.backgroundPosition = `-${frame.x}px -${frame.y}px`;
+    scrubPreview.setAttribute('ytpp-has-frame', '');
+  }
+
+  // Sheets load on demand. Until one arrives the previous frame stays up, so
+  // sweeping across the bar doesn't flicker.
+  function showScrubFrame(time) {
+    if (!storyboard || !scrubVideo) return;
+    const duration = isFinite(scrubVideo.duration) ? scrubVideo.duration : scrubEndThreshold;
+    // intervalMs is 0 for specs that spread a fixed frame count over the video.
+    const interval = storyboard.intervalMs > 0 ? storyboard.intervalMs / 1000
+                                               : duration / storyboard.count;
+    if (!(interval > 0) || !isFinite(interval)) return;
+
+    const index    = Math.max(0, Math.min(storyboard.count - 1, Math.floor(time / interval)));
+    const perSheet = storyboard.cols * storyboard.rows;
+    const cell     = index % perSheet;
+    const url      = storyboard.urlBase.replace('$M', () => String(Math.floor(index / perSheet)));
+    const frame    = {
+      url,
+      x: (cell % storyboard.cols) * storyboard.w,
+      y: Math.floor(cell / storyboard.cols) * storyboard.h,
+    };
+    wantedFrame = frame;
+
+    const state = sheetState.get(url);
+    if (state === 'loaded') { paintScrubFrame(frame); return; }
+    if (state) return; // loading, or failed once: don't hammer it on every mousemove
+
+    sheetState.set(url, 'loading');
+    const img = new Image();
+    img.onload  = () => {
+      sheetState.set(url, 'loaded');
+      if (wantedFrame?.url === url) paintScrubFrame(wantedFrame);
+    };
+    img.onerror = () => { sheetState.set(url, 'failed'); };
+    img.src = url;
+  }
+
+  function updateScrubPreview(clientX) {
+    if (!pinnedVP) return;
+    const bar    = scrubber.getBoundingClientRect();
+    const travel = bar.width - SCRUB_THUMB_W; // the thumb's center stops half a thumb short of each end
+    const min    = parseFloat(scrubber.min) || 0;
+    const max    = parseFloat(scrubber.max);
+    if (travel <= 0 || !(max > min)) return;
+
+    const frac = Math.max(0, Math.min(1, (clientX - bar.left - SCRUB_THUMB_W / 2) / travel));
+    const time = min + frac * (max - min);
+    scrubTime.textContent = pinnedIsLive && liveState?.hasRange ? liveOffsetLabel(max - time)
+                                                                : formatTime(time);
+    requestStoryboard();
+    showScrubFrame(time);
+
+    // Centered over the pointed-at spot, kept inside the preview's edges.
+    scrubPreview.setAttribute('ytpp-ready', '');
+    const half   = scrubPreview.offsetWidth / 2;
+    const bounds = pinnedVP.getBoundingClientRect();
+    const x      = bar.left + SCRUB_THUMB_W / 2 + frac * travel;
+    const left   = Math.max(bounds.left + half + 8, Math.min(bounds.right - half - 8, x));
+    scrubPreview.style.left = `${left}px`;
+    scrubPreview.style.top  = `${bar.top - 8}px`;
+  }
+
+  function resetScrubPreview() {
+    storyboard        = null;
+    storyboardAskedAt = 0;
+    wantedFrame       = null;
+    sheetState.clear();
+    scrubPreview.removeAttribute('ytpp-ready');
+    scrubPreview.removeAttribute('ytpp-has-frame');
+    scrubSheet.style.backgroundImage = '';
+  }
+
+  // A drag keeps tracking after the pointer strays off the bar, as the
+  // range input itself does.
+  document.addEventListener('mousemove', (e) => {
+    if (!pinnedCard) return;
+    if (scrubbing || e.target === scrubber) updateScrubPreview(e.clientX);
+  }, true);
+
   // ---- Pin / Unpin ---------------------------------------------------------
 
   function setPauseState(paused) {
@@ -516,9 +728,10 @@
     pinnedVP   = vp;
     card.setAttribute('ytpp-pinned-card', '');
 
-    // YouTube reports a finite duration even for live previews, so detect
-    // live from the LIVE badge on the card instead.
-    const isLive = !!card.querySelector('.ytBadgeShapeThumbnailLive');
+    // YouTube reports a finite duration even for live previews, so ask the
+    // player, and fall back to the LIVE badge on the card (search results
+    // use a different badge, so the badge alone misses live streams there).
+    const isLive = queryLiveState()?.isLive || !!card.querySelector('.ytBadgeShapeThumbnailLive');
     pinnedIsLive = isLive;
     controls.toggleAttribute('ytpp-live', isLive);
 
@@ -554,10 +767,13 @@
     document.body.classList.remove('ytpp-active');
     pinnedCard     = null;
     pinnedIsLive   = false;
+    liveState      = null;
+    controls.removeAttribute('ytpp-behind-live');
     pinnedNaturalW = 0;
     pinnedNaturalH = 0;
     setPauseState(false);
     detachScrubber();
+    resetScrubPreview();
     stopBlockingHidden();
 
     // Use the element captured at pin time — if YouTube rebuilt the preview
@@ -587,6 +803,21 @@
       e.stopPropagation();
       e.stopImmediatePropagation();
       togglePause();
+      return;
+    }
+
+    if (e.target.closest?.('.ytpp-live-badge')) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      if (pinnedCard && pinnedIsLive && scrubVideo) {
+        // Seek the element directly, as the scrubber does: the preview
+        // player ignores its own seek API (it reports allowSeeking: false).
+        const live = queryLiveState();
+        if (live?.hasRange) scrubVideo.currentTime = live.end;
+        if (previewPaused) togglePause(); // "go live" means play live
+        flashControls();
+      }
       return;
     }
 
@@ -687,7 +918,7 @@
 
   document.addEventListener('yt-navigate-start', () => {
     unpin();
-    document.body.classList.remove('ytpp-on-short');
+    document.body.classList.remove('ytpp-no-pin');
     currentPreviewCard = null;
     lastSeenCard       = null;
   });

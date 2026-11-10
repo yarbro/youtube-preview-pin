@@ -225,7 +225,8 @@ ytd-video-preview:not([hidden]):hover .ytpp-pin-btn {
   pointer-events: auto;
 }
 
-body.ytpp-on-short .ytpp-pin-btn {
+/* Shorts and sponsored cards can't be pinned (set by content.js). */
+body.ytpp-no-pin .ytpp-pin-btn {
   opacity: 0 !important;
   pointer-events: none !important;
 }
@@ -394,17 +395,36 @@ ytd-video-preview[ytpp-pinned][ytpp-show-controls] #ytpp-controls {
   -webkit-user-select: none;
 }
 
+/* Nothing to show at the live edge — the LIVE badge says it. */
+.ytpp-scrubber-label:empty {
+  display: none;
+}
+
+/* A button: clicking it jumps back to the live edge. Red at the live edge,
+ * grey once playback is behind it, like YouTube's own. */
 .ytpp-live-badge {
   display: none;
   flex-shrink: 0;
+  margin: 0;
   padding: 3px 6px;
   color: #fff;
   background: #e1002d;
+  border: 0;
   border-radius: 4px;
   font: 700 11px/1 var(--ytpp-font);
   letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: background 0.15s;
   user-select: none;
   -webkit-user-select: none;
+}
+
+#ytpp-controls[ytpp-behind-live] .ytpp-live-badge {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+#ytpp-controls[ytpp-behind-live] .ytpp-live-badge:hover {
+  background: rgba(255, 255, 255, 0.42);
 }
 
 #ytpp-controls[ytpp-live] .ytpp-live-badge {
@@ -452,9 +472,61 @@ ytd-video-preview[ytpp-pinned][ytpp-show-controls] #ytpp-controls {
   transform: scale(1.3);
 }
 
+/* ---- Scrubber preview -----------------------------------------------------
+ * Frame thumbnail and time above the scrubber. Appended to <body> and
+ * positioned by content.js (left/top = the point it hangs above). Shown purely
+ * by the scrubber's :hover / :active state — :active keeps it up through a
+ * drag that strays off the bar — and only once content.js has positioned it. */
+.ytpp-scrub-preview {
+  display: none;
+  position: fixed;
+  z-index: 100001;
+  transform: translate(-50%, -100%);
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.ytpp-active:has(.ytpp-scrubber:is(:hover, :active)) .ytpp-scrub-preview[ytpp-ready] {
+  display: flex;
+}
+
+.ytpp-scrub-frame {
+  display: none;
+  overflow: hidden;
+  background: #000;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22), 0 6px 24px rgba(0, 0, 0, 0.6);
+}
+
+.ytpp-scrub-preview[ytpp-has-frame] .ytpp-scrub-frame {
+  display: block;
+}
+
+/* Native frame size, scaled to fit by content.js; the background is the
+ * sprite sheet, offset to the wanted frame. */
+.ytpp-scrub-sheet {
+  transform-origin: 0 0;
+  background-repeat: no-repeat;
+}
+
+.ytpp-scrub-time {
+  padding: 4px 7px;
+  color: #fff;
+  background: var(--ytpp-surface);
+  border: 1px solid var(--ytpp-border);
+  border-radius: 4px;
+  font: 500 12px/1 var(--ytpp-font);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Keyboard focus ------------------------------------------------------- */
 .ytpp-pin-btn:focus-visible,
 .ytpp-pause-btn:focus-visible,
+.ytpp-live-badge:focus-visible,
 .ytpp-unpin-btn:focus-visible {
   outline: 2px solid var(--ytpp-focus);
   outline-offset: 2px;
@@ -492,6 +564,13 @@ ytd-video-preview[ytpp-pinned][ytpp-show-controls] yt-inline-player-controls {
 ytd-video-preview[ytpp-pinned] .ytInlinePlayerControlsTopRightControls {
   transform: scale(calc(1 / var(--ytpp-scale, 1.5)));
   transform-origin: top right;
+}
+
+/* Same for the top-left corner, where YouTube shows the "Includes paid
+ * promotion" notice for the first few seconds. */
+ytd-video-preview[ytpp-pinned] .ytInlinePlayerControlsTopLeftControls {
+  transform: scale(calc(1 / var(--ytpp-scale, 1.5)));
+  transform-origin: top left;
 }
 
 /* The playback bar replaces YouTube's bottom progress bar and remaining-time
