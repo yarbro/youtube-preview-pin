@@ -69,6 +69,11 @@ ytd-video-preview[ytpp-pinned] {
   top: 50% !important;
   left: 50% !important;
   padding: 0 !important;
+  /* Current previews size themselves width/height:100% of their container
+   * (ytdVideoPreviewFillContainer). Once fixed, that container is the
+   * viewport, so lock the preview to the media size measured at pin time. */
+  width: var(--ytpp-pin-w, auto) !important;
+  height: var(--ytpp-pin-h, auto) !important;
   transform: translate(-50%, -50%) scale(var(--ytpp-scale, 1.5)) !important;
   transform-origin: center center !important;
   z-index: 99999 !important;
@@ -111,15 +116,29 @@ body.ytpp-active ytd-video-preview {
   opacity: 1 !important;
 }
 
+/* Current previews are flex containers, and the media inside fills them
+ * through flex stretch plus height:100%. As a block, every container down to
+ * the player collapses to 0 height and the player shrinks the video to a few
+ * pixels (it doesn't re-measure once the layout is fixed). */
+body.ytpp-active ytd-video-preview.ytdVideoPreviewHost {
+  display: flex !important;
+}
+
 /* Tagged by content.js when YouTube hides the pinned preview or an element
  * wrapping its <video>. Overriding from here, instead of clearing YouTube's
  * inline style or hidden attribute, means YouTube's own state is intact
- * again the moment the pin ends. */
+ * again the moment the pin ends. The attribute's value is the display the
+ * element had at pin time, so flex containers stay flex. */
 ytd-video-preview[ytpp-pinned][ytpp-keep-visible],
 ytd-video-preview[ytpp-pinned] [ytpp-keep-visible] {
   display: block !important;
   visibility: visible !important;
   opacity: 1 !important;
+}
+
+ytd-video-preview[ytpp-pinned][ytpp-keep-visible="flex"],
+ytd-video-preview[ytpp-pinned] [ytpp-keep-visible="flex"] {
+  display: flex !important;
 }
 
 /* Current previews fade the player layer out by dropping the

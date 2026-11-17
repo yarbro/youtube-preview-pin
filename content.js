@@ -289,8 +289,21 @@
   // after a pin that had buffered.
   const KEEP_VISIBLE = 'ytpp-keep-visible';
 
+  // Each guarded element's display at pin time, while it's still visible, so
+  // the override can restore flex containers as flex rather than block.
+  let naturalDisplay = new WeakMap();
+
+  function recordNaturalDisplay(vp) {
+    const video = vp.querySelector('video');
+    for (let el = video ?? vp; el; el = el.parentElement) {
+      naturalDisplay.set(el, getComputedStyle(el).display);
+      if (el === vp) break;
+    }
+  }
+
   function startBlockingHidden(vp) {
     stopBlockingHidden();
+    recordNaturalDisplay(vp);
     hiddenBlocker = new MutationObserver((mutations) => {
       for (const mut of mutations) {
         if (mut.type === 'childList') {
@@ -335,7 +348,11 @@
                                 el.style.display    === 'none'   ||
                                 el.style.visibility === 'hidden' ||
                                 parseFloat(el.style.opacity) === 0;
-        el.toggleAttribute(KEEP_VISIBLE, hiddenByYouTube);
+        if (hiddenByYouTube) {
+          el.setAttribute(KEEP_VISIBLE, naturalDisplay.get(el) === 'flex' ? 'flex' : '');
+        } else {
+          el.removeAttribute(KEEP_VISIBLE);
+        }
       }
     });
     hiddenBlocker.observe(vp, {
@@ -350,6 +367,7 @@
     hiddenBlocker?.disconnect();
     hiddenBlocker = null;
     for (const el of document.querySelectorAll(`[${KEEP_VISIBLE}]`)) el.removeAttribute(KEEP_VISIBLE);
+    naturalDisplay = new WeakMap();
   }
 
   // ---- Scrubber ------------------------------------------------------------
@@ -749,9 +767,12 @@
     controls.toggleAttribute('ytpp-live', isLive);
 
     // Measure before ytpp-pinned applies position:fixed (which would change
-    // the size).
-    pinnedNaturalW = vp.offsetWidth  || Math.round(window.innerWidth * 0.25);
-    pinnedNaturalH = vp.offsetHeight || Math.round(pinnedNaturalW * 9 / 16);
+    // the size). Content box only: the pinned preview drops its padding.
+    const vpStyle = getComputedStyle(vp);
+    const contentW = vp.clientWidth  - parseFloat(vpStyle.paddingLeft) - parseFloat(vpStyle.paddingRight);
+    const contentH = vp.clientHeight - parseFloat(vpStyle.paddingTop)  - parseFloat(vpStyle.paddingBottom);
+    pinnedNaturalW = contentW > 0 ? contentW : Math.round(window.innerWidth * 0.25);
+    pinnedNaturalH = contentH > 0 ? contentH : Math.round(pinnedNaturalW * 9 / 16);
     const scale = computePinScale(pinnedNaturalW, pinnedNaturalH);
 
     // Arm page_shim.js synchronously before the element moves. targetHeight
@@ -760,7 +781,11 @@
     const targetHeight = pinnedNaturalH * scale * window.devicePixelRatio;
     document.dispatchEvent(new CustomEvent('ytpp-pin', { detail: { disableCaptions, isLive, targetHeight } }));
 
-    document.documentElement.style.setProperty('--ytpp-scale', scale);
+    // On <html> rather than the preview, whose style attribute YouTube rewrites.
+    const rootStyle = document.documentElement.style;
+    rootStyle.setProperty('--ytpp-scale', scale);
+    rootStyle.setProperty('--ytpp-pin-w', `${pinnedNaturalW}px`);
+    rootStyle.setProperty('--ytpp-pin-h', `${pinnedNaturalH}px`);
 
     document.body.classList.add('ytpp-active');
     vp.setAttribute('ytpp-pinned', '');
@@ -795,7 +820,9 @@
     pinnedVP?.removeAttribute('ytpp-pinned');
     pinnedVP?.removeAttribute('ytpp-show-controls');
     pinnedVP = null;
-    document.documentElement.style.removeProperty('--ytpp-scale');
+    for (const prop of ['--ytpp-scale', '--ytpp-pin-w', '--ytpp-pin-h']) {
+      document.documentElement.style.removeProperty(prop);
+    }
   }
 
   // ---- Event listeners -----------------------------------------------------
